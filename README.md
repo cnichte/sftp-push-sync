@@ -6,6 +6,8 @@ Implements a push syncronisation with Dry-Run. Performs the following tasks:
 2. Delete remote files that no longer exist locally
 3. Identify changes based on size or altered content and upload them
 
+I use the script to transfer [Hugo websites](https://gohugo.io) to the server.
+
 Features:
 
 - multiple connections in sync.config.json
@@ -74,13 +76,13 @@ If you have stored the scripts in `package.json` as follows:
 ```json
 
 "scripts": {
-    "sync:staging": "node sftp-push-sync.mjs staging",
-    "sync:staging:dry": "node sftp-push-sync.mjs staging --dry-run",
+    "sync:staging": "node sftp-push-sync staging",
+    "sync:staging:dry": "node sftp-push-sync staging --dry-run",
     "ss": "npm run sync:staging",
     "ssd": "npm run sync:staging:dry",
 
-    "sync:prod": "node sftp-push-sync.mjs prod",
-    "sync:prod:dry": "node sftp-push-sync.mjs prod --dry-run",
+    "sync:prod": "node sftp-push-sync prod",
+    "sync:prod:dry": "node sftp-push-sync prod --dry-run",
     "sp": "npm run sync:prod",
     "spd": "npm run sync:prod:dry",
   },
@@ -90,7 +92,6 @@ The dry run is a great way to compare files and fill the cache.
 
 ## Which files are needed?
 
-- `shell-scripts/sync-sftp.mjs` - The upload script (for details, see the script)
 - `sync.config.json` - The configuration file (with passwords in plain text, so please leave it out of the git repository)
 
 ## Which files are created?

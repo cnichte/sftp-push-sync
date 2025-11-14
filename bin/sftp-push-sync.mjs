@@ -3,7 +3,7 @@
  ** sync-sftp.mjs - SFTP Syncronisations Tool
  * 
  * SFTP push sync with dry run
- *  1. Upload new files
+ * 1. Upload new files
  * 2. Delete remote files that no longer exist locally
  * 3. Detect changes based on size or modified content and upload them
  * 
@@ -33,6 +33,11 @@ import { diffWords } from "diff";
 import { createHash } from "crypto";
 import { Writable } from "stream";
 import pc from "picocolors";
+
+// Colors for the State
+const ADD = pc.green("+");  // Added
+const CHA = pc.yellow("~"); // Changed
+const DEL = pc.red("-");    // deleted
 
 // ---------------------------------------------------------------------------
 // CLI arguments
@@ -417,7 +422,7 @@ async function main() {
   const start = Date.now();
   
   log("\n\n==================================================================");
-  log(pc.bold("🔐  SFTP-Synchronisation - shell-scripts/sync-sftp.mjs"));
+  log(pc.bold("🔐 SFTP Push-Synchronisation: sftp-push-sync"));
   log(`   Connection: ${pc.cyan(TARGET)}  (Worker: ${CONNECTION.workers})`);
   log(`   Host:Port: ${pc.green(CONNECTION.host)}:${pc.green(CONNECTION.port)}`);
   log(`   Local:  ${pc.green(CONNECTION.localRoot)}`);
@@ -475,14 +480,14 @@ async function main() {
 
       if (!r) {
         toAdd.push({ rel, local: l, remotePath });
-        log(`${pc.green("➕ New:")} ${rel}`);
+        log(`${ADD} ${pc.green("New:")} ${rel}`);
         continue;
       }
 
       // 1. size comparison
       if (l.size !== r.size) {
         toUpdate.push({ rel, local: l, remote: r, remotePath });
-        log(`${pc.yellow("🔁 Size changed:")} ${rel}`);
+        log(`${CHANGE} ${pc.yellow("Size changed:")} ${rel}`);
         continue;
       }
 
@@ -508,11 +513,11 @@ async function main() {
         if (VERBOSE) {
           const diff = diffWords(remoteStr, localStr);
           const blocks = diff.filter((d) => d.added || d.removed).length;
-          vlog(`   ↪️ text difference (${blocks} Blocks) in ${rel}`);
+          vlog(`   ${CHANGE} text difference (${blocks} Blocks) in ${rel}`);
         }
 
         toUpdate.push({ rel, local: l, remote: r, remotePath });
-        log(`${pc.yellow("   🔁 Content changed(Text):")} ${rel}`);
+        log(`${CHANGE} ${pc.yellow("Content changed(Text):")} ${rel}`);
       } else {
         // Binary: Hash comparison with cache
         const localMeta = l;
@@ -529,13 +534,13 @@ async function main() {
         }
 
         if (VERBOSE) {
-          vlog(`   ↪️ Hash different(binary): ${rel}`);
+          vlog(`   ${CHA} Hash different(binary): ${rel}`);
           vlog(`      local:  ${localHash}`);
           vlog(`      remote: ${remoteHash}`);
         }
 
         toUpdate.push({ rel, local: l, remote: r, remotePath });
-        log(`${pc.yellow("   🔁 Content changed (Binary):")} ${rel}`);
+        log(`${CHANGE} ${pc.yellow("Content changed (Binary):")} ${rel}`);
       }
     }
 
@@ -544,7 +549,7 @@ async function main() {
       if (!localKeys.has(rel)) {
         const r = remote.get(rel);
         toDelete.push({ rel, remotePath: r.remotePath });
-        log(`${pc.red("   🗑 Remove:")} ${rel}`);
+        log(`   ${DEL} ${pc.red("Remove:")} ${rel}`);
       }
     }
 
@@ -616,21 +621,20 @@ async function main() {
     // Summary
     log("\n" + pc.bold(pc.cyan("📊 Summary:")));
     log(`   Dauer: ${pc.green(duration + " s")}`);
-    log(`   ➕ Added  : ${toAdd.length}`);
-    log(`   🔁 Changed:   ${toUpdate.length}`);
-    log(`   🗑 Deleted:   ${toDelete.length}`);
+    log(`   ${ADD} Added  : ${toAdd.length}`);
+    log(`   ${CHA} Changed: ${toUpdate.length}`);
+    log(`   ${DEL} Deleted:   ${toDelete.length}`);
 
     if (toAdd.length || toUpdate.length || toDelete.length) {
       log("\n📄 Changes:");
-      [...toAdd.map((t) => t.rel)].sort().forEach((f) => console.log(`   ${pc.green("➕")} ${f}`));
-      [...toUpdate.map((t) => t.rel)].sort().forEach((f) => console.log(`   ${pc.yellow("🔁")} ${f}`));
-      [...toDelete.map((t) => t.rel)].sort().forEach((f) => console.log(`   ${pc.red("🗑")} ${f}`));
+      [...toAdd.map((t) => t.rel)].sort().forEach((f) => console.log(`   ${ADD} ${f}`));
+      [...toUpdate.map((t) => t.rel)].sort().forEach((f) => console.log(`   ${CHA} ${f}`));
+      [...toDelete.map((t) => t.rel)].sort().forEach((f) => console.log(`   ${DEL} ${f}`));
     } else {
       log("\nNo changes.");
     }
 
     log("\n" + pc.bold(pc.green("✅ Sync complete.")));
-    log("==================================================================\n\n");
   } catch (err) {
     elog(pc.red("❌ Synchronisation error:"), err);
     process.exitCode = 1;
@@ -642,6 +646,7 @@ async function main() {
   } finally {
     try {
       await sftp.end();
+      log("==================================================================\n\n");
     } catch {
       // ignore
     }

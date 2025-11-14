@@ -19,7 +19,7 @@
     "sync"
   ],
   "author": "Carsten Nichte",
-  "license": "MIT",
+  "license": "GPL-3.0-or-later",
   "dependencies": {
     "ssh2-sftp-client": "^10.0.0",
     "minimatch": "^9.0.3",

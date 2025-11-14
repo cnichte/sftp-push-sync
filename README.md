@@ -76,13 +76,13 @@ If you have stored the scripts in `package.json` as follows:
 ```json
 
 "scripts": {
-    "sync:staging": "node sftp-push-sync staging",
-    "sync:staging:dry": "node sftp-push-sync staging --dry-run",
+    "sync:staging": "sftp-push-sync staging",
+    "sync:staging:dry": "sftp-push-sync staging --dry-run",
     "ss": "npm run sync:staging",
     "ssd": "npm run sync:staging:dry",
 
-    "sync:prod": "node sftp-push-sync prod",
-    "sync:prod:dry": "node sftp-push-sync prod --dry-run",
+    "sync:prod": "sftp-push-sync prod",
+    "sync:prod:dry": "sftp-push-sync prod --dry-run",
     "sp": "npm run sync:prod",
     "spd": "npm run sync:prod:dry",
   },

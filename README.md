@@ -22,6 +22,12 @@ Features:
   
 The file `sftp-push-sync.mjs` is pure JavaScript (ESM), not TypeScript. Node.js can execute it directly as long as "type": "module" is specified in package.json or the file has the extension .mjs.
 
+## Install
+
+```bash
+npm i sftp-push-sync
+```
+
 ## Config file
 
 Create a `sync.config.json` in the root folder of your project:
@@ -103,3 +109,8 @@ You can safely delete the local cache at any time. The first analysis will then 
 ## special features
 
 The first run always takes a while, especially with lots of images – so be patient! Once the cache is full, it will be faster.
+
+## Links
+
+- <https://www.npmjs.com/package/sftp-push-sync>
+- <https://github.com/cnichte/sftp-push-sync>

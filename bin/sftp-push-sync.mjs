@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 /**
- ** sync-sftp.mjs - SFTP Syncronisations Tool
+ ** sftp-push-sync.mjs - SFTP Syncronisations Tool
+ *
+ * @author Carsten Nichte, 2025 / https://carsten-nichte.de
  * 
  * SFTP push sync with dry run
  * 1. Upload new files
@@ -18,11 +20,9 @@
  *  - Parallel uploads/deletes via worker pool
  *  - include/exclude patterns
  * 
- * The file shell-scripts/sync-sftp.mjs is pure JavaScript (ESM), not TypeScript.
+ * The file sftp-push-sync.mjs is pure JavaScript (ESM), not TypeScript.
  * Node.js can execute it directly as long as "type": "module" is specified in package.json 
  * or the file has the extension .mjs.
- * 
- * @author Carsten Nichte, 2025 / https://carsten-nichte.de
  */
 import fs from "fs";
 import fsp from "fs/promises";
@@ -424,8 +424,8 @@ async function main() {
   log("\n\n==================================================================");
   log(pc.bold("🔐 SFTP Push-Synchronisation: sftp-push-sync"));
   log(`   Connection: ${pc.cyan(TARGET)}  (Worker: ${CONNECTION.workers})`);
-  log(`   Host:Port: ${pc.green(CONNECTION.host)}:${pc.green(CONNECTION.port)}`);
-  log(`   Local:  ${pc.green(CONNECTION.localRoot)}`);
+  log(`   Host: ${pc.green(CONNECTION.host)}:${pc.green(CONNECTION.port)}`);
+  log(`   Local: ${pc.green(CONNECTION.localRoot)}`);
   log(`   Remote: ${pc.green(CONNECTION.remoteRoot)}`);
   if (DRY_RUN) log(pc.yellow("   Modus: DRY-RUN (no changes)"));
   log("-----------------------------------------------------------------\n");
@@ -453,7 +453,7 @@ async function main() {
 
     log(pc.bold(pc.cyan("📥 Phase 1: Scan local files …")));
     const local = await walkLocal(CONNECTION.localRoot);
-    log(`   → ${local.size} lokale Dateien`);
+    log(`   → ${local.size} local files`);
 
     log(pc.bold(pc.cyan("📤 Phase 2: Scan remote files …")));
     const remote = await walkRemote(sftp, CONNECTION.remoteRoot);
@@ -620,10 +620,10 @@ async function main() {
 
     // Summary
     log("\n" + pc.bold(pc.cyan("📊 Summary:")));
-    log(`   Dauer: ${pc.green(duration + " s")}`);
+    log(`   Duration: ${pc.green(duration + " s")}`);
     log(`   ${ADD} Added  : ${toAdd.length}`);
     log(`   ${CHA} Changed: ${toUpdate.length}`);
-    log(`   ${DEL} Deleted:   ${toDelete.length}`);
+    log(`   ${DEL} Deleted: ${toDelete.length}`);
 
     if (toAdd.length || toUpdate.length || toDelete.length) {
       log("\n📄 Changes:");

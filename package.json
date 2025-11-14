@@ -4,7 +4,7 @@
   "description": "SFTP Sync Tool für Hugo-Projekte (local -> remote, mit Hash-Cache)",
   "type": "module",
   "bin": {
-    "hugo-sftp-sync": "./bin/sftp-sync.mjs"
+    "hugo-sftp-sync": "./bin/sftp-push-sync.mjs"
   },
   "keywords": [
     "hugo",

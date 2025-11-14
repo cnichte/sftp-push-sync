@@ -18,7 +18,7 @@ Features:
 - Parallel uploads/deletions via worker pool
 - include/exclude patterns
   
-The file shell-scripts/sync-sftp.mjs is pure JavaScript (ESM), not TypeScript. Node.js can execute it directly as long as "type": "module" is specified in package.json or the file has the extension .mjs.
+The file `sftp-push-sync.mjs` is pure JavaScript (ESM), not TypeScript. Node.js can execute it directly as long as "type": "module" is specified in package.json or the file has the extension .mjs.
 
 ## Config file
 
@@ -74,13 +74,13 @@ If you have stored the scripts in `package.json` as follows:
 ```json
 
 "scripts": {
-    "sync:staging": "node ./shell-scripts/sync-sftp.mjs staging",
-    "sync:staging:dry": "node ./shell-scripts/sync-sftp.mjs staging --dry-run",
+    "sync:staging": "node sftp-push-sync.mjs staging",
+    "sync:staging:dry": "node sftp-push-sync.mjs staging --dry-run",
     "ss": "npm run sync:staging",
     "ssd": "npm run sync:staging:dry",
 
-    "sync:prod": "node ./shell-scripts/sync-sftp.mjs prod",
-    "sync:prod:dry": "node ./shell-scripts/sync-sftp.mjs prod --dry-run",
+    "sync:prod": "node sftp-push-sync.mjs prod",
+    "sync:prod:dry": "node sftp-push-sync.mjs prod --dry-run",
     "sp": "npm run sync:prod",
     "spd": "npm run sync:prod:dry",
   },

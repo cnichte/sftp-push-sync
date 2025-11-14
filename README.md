@@ -64,9 +64,39 @@ Create a `sync.config.json` in the root folder of your project:
   ],
   "textExtensions": [
     ".html", ".xml", ".txt", ".json", ".js", ".css", ".md", ".svg"
+  ],
+    "uploadList": [
+    "download-files.json"
+  ],
+  "downloadList": [
+    "download-counter.json"
   ]
 }
 ```
+
+### special cases
+
+- uploadList
+  - Relativ zu localRoot "download-files.json"
+  - oder mit Unterordnern: "data/download-files.json"
+- downloadList
+  - Relativ zu remoteRoot "download-counter.json"
+  - oder zB. "logs/download-counter.json"
+
+
+```bash
+# normal synchronisation
+sftp-push-sync staging
+
+# Normal synchronisation + explicitly transfer upload list
+sftp-push-sync staging --upload-list
+
+# just fetch the download list from the server (combined with normal synchronisation)
+sftp-push-sync prod --download-list --dry-run   # erst ansehen
+sftp-push-sync prod --download-list             # dann machen
+```
+
+## NPM Scripts
 
 - Can be conveniently started via the scripts in `package.json`:
 

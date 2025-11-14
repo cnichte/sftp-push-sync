@@ -20,6 +20,12 @@
  *  - Parallel uploads/deletes via worker pool
  *  - include/exclude patterns
  * 
+ * Special cases: 
+ * - Files can be excluded from synchronisation.
+ * - For example, log files or other special files.
+ * - These files can be downloaded or uploaded separately.
+ * 
+ * 
  * The file sftp-push-sync.mjs is pure JavaScript (ESM), not TypeScript.
  * Node.js can execute it directly as long as "type": "module" is specified in package.json 
  * or the file has the extension .mjs.
@@ -34,10 +40,10 @@ import { createHash } from "crypto";
 import { Writable } from "stream";
 import pc from "picocolors";
 
-// Colors for the State
+// Colors for the State (works on dark + light background)
 const ADD = pc.green("+");  // Added
 const CHA = pc.yellow("~"); // Changed
-const DEL = pc.red("-");    // deleted
+const DEL = pc.red("-");    // Deleted
 
 // ---------------------------------------------------------------------------
 // CLI arguments
@@ -47,10 +53,12 @@ const args = process.argv.slice(2);
 const TARGET = args[0];
 const DRY_RUN = args.includes("--dry-run");
 const VERBOSE = args.includes("--verbose") || args.includes("-v");
+const RUN_UPLOAD_LIST = args.includes("--upload-list");
+const RUN_DOWNLOAD_LIST = args.includes("--download-list");
 
 if (!TARGET) {
   console.error(pc.red("❌ Please specify a connection profile:"));
-  console.error(pc.yellow("   node sync-sftp.mjs staging --dry-run"));
+  console.error(pc.yellow("   sftp-push-sync staging --dry-run"));
   process.exit(1);
 }
 
@@ -111,6 +119,10 @@ const TEXT_EXT = CONFIG_RAW.textExtensions ?? [
   ".svg",
 ];
 
+// SPECIAL LISTS
+const UPLOAD_LIST = CONFIG_RAW.uploadList ?? [];
+const DOWNLOAD_LIST = CONFIG_RAW.downloadList ?? [];
+
 // Cache file name per connection
 const syncCacheName =
   TARGET_CONFIG.syncCache || `.sync-cache.${TARGET}.json`;
@@ -122,7 +134,7 @@ const CACHE_PATH = path.resolve(syncCacheName);
 
 let CACHE = {
   version: 1,
-  local: {}, // key: "<TARGET>:<relPath>" -> { size, mtimeMs, hash }
+  local: {},  // key: "<TARGET>:<relPath>" -> { size, mtimeMs, hash }
   remote: {}, // key: "<TARGET>:<relPath>" -> { size, modifyTime, hash }
 };
 
@@ -134,7 +146,7 @@ try {
     CACHE.remote = raw.remote ?? {};
   }
 } catch (err) {
-  wlog(pc.yellow("⚠️  Konnte Cache nicht laden, starte ohne Cache:"), err.message);
+  wlog(pc.yellow("⚠️  Could not load cache, starting without:"), err.message);
 }
 
 function cacheKey(relPath) {
@@ -224,7 +236,7 @@ function updateProgress(prefix, current, total) {
   const msg = `${prefix}${current}/${total} Dateien (${percent}%)`;
 
   if (!process.stdout.isTTY) {
-    // Fallback: simply log in
+    // Fallback: simply log
     console.log("   " + msg);
     return;
   }
@@ -243,7 +255,7 @@ function updateProgress(prefix, current, total) {
 
 // Simple worker pool for parallel tasks
 async function runTasks(items, workerCount, handler, label = "Tasks") {
-  if (items.length === 0) return;
+  if (!items || items.length === 0) return;
 
   const total = items.length;
   let done = 0;
@@ -259,7 +271,7 @@ async function runTasks(items, workerCount, handler, label = "Tasks") {
       try {
         await handler(item);
       } catch (err) {
-        elog(pc.red(`   ⚠️ Fehler in ${label}:`), err.message || err);
+        elog(pc.red(`   ⚠️ Error in ${label}:`), err.message || err);
       }
       done += 1;
       if (done % 10 === 0 || done === total) {
@@ -309,7 +321,7 @@ async function walkLocal(root) {
 }
 
 // ---------------------------------------------------------------------------
-// Remote walker (recursive, all subdirectories)
+// Remote walker (recursive, all subdirectories) – respects INCLUDE/EXCLUDE
 // ---------------------------------------------------------------------------
 
 async function walkRemote(sftp, remoteRoot) {
@@ -323,6 +335,9 @@ async function walkRemote(sftp, remoteRoot) {
 
       const full = path.posix.join(remoteDir, item.name);
       const rel = prefix ? `${prefix}/${item.name}` : item.name;
+
+      // Apply include/exclude rules also on remote side
+      if (!isIncluded(rel)) continue;
 
       if (item.type === "d") {
         await recurse(full, rel);
@@ -342,7 +357,7 @@ async function walkRemote(sftp, remoteRoot) {
 }
 
 // ---------------------------------------------------------------------------
-// Hash helper for binaries (streaming, memory-efficient)
+ // Hash helper for binaries (streaming, memory-efficient)
 // ---------------------------------------------------------------------------
 
 function hashLocalFile(filePath) {
@@ -424,10 +439,19 @@ async function main() {
   log("\n\n==================================================================");
   log(pc.bold("🔐 SFTP Push-Synchronisation: sftp-push-sync"));
   log(`   Connection: ${pc.cyan(TARGET)}  (Worker: ${CONNECTION.workers})`);
-  log(`   Host: ${pc.green(CONNECTION.host)}:${pc.green(CONNECTION.port)}`);
-  log(`   Local: ${pc.green(CONNECTION.localRoot)}`);
+  log(`   Host:   ${pc.green(CONNECTION.host)}:${pc.green(CONNECTION.port)}`);
+  log(`   Local:  ${pc.green(CONNECTION.localRoot)}`);
   log(`   Remote: ${pc.green(CONNECTION.remoteRoot)}`);
-  if (DRY_RUN) log(pc.yellow("   Modus: DRY-RUN (no changes)"));
+  if (DRY_RUN) log(pc.yellow("   Mode: DRY-RUN (no changes)"));
+  if (RUN_UPLOAD_LIST || RUN_DOWNLOAD_LIST) {
+    log(
+      pc.blue(
+        `   Extra: ${RUN_UPLOAD_LIST ? "uploadList " : ""}${
+          RUN_DOWNLOAD_LIST ? "downloadList" : ""
+        }`
+      )
+    );
+  }
   log("-----------------------------------------------------------------\n");
 
   const sftp = new SftpClient();
@@ -457,7 +481,7 @@ async function main() {
 
     log(pc.bold(pc.cyan("📤 Phase 2: Scan remote files …")));
     const remote = await walkRemote(sftp, CONNECTION.remoteRoot);
-    log(`   → ${remote.size} remote files`);
+    log(`   → ${remote.size} remote files\n`);
 
     const localKeys = new Set(local.keys());
     const remoteKeys = new Set(remote.keys());
@@ -487,7 +511,7 @@ async function main() {
       // 1. size comparison
       if (l.size !== r.size) {
         toUpdate.push({ rel, local: l, remote: r, remotePath });
-        log(`${CHANGE} ${pc.yellow("Size changed:")} ${rel}`);
+        log(`${CHA} ${pc.yellow("Size changed:")} ${rel}`);
         continue;
       }
 
@@ -513,11 +537,11 @@ async function main() {
         if (VERBOSE) {
           const diff = diffWords(remoteStr, localStr);
           const blocks = diff.filter((d) => d.added || d.removed).length;
-          vlog(`   ${CHANGE} text difference (${blocks} Blocks) in ${rel}`);
+          vlog(`   ${CHA} Text difference (${blocks} blocks) in ${rel}`);
         }
 
         toUpdate.push({ rel, local: l, remote: r, remotePath });
-        log(`${CHANGE} ${pc.yellow("Content changed(Text):")} ${rel}`);
+        log(`${CHA} ${pc.yellow("Content changed (Text):")} ${rel}`);
       } else {
         // Binary: Hash comparison with cache
         const localMeta = l;
@@ -534,13 +558,13 @@ async function main() {
         }
 
         if (VERBOSE) {
-          vlog(`   ${CHA} Hash different(binary): ${rel}`);
+          vlog(`   ${CHA} Hash different (binary): ${rel}`);
           vlog(`      local:  ${localHash}`);
           vlog(`      remote: ${remoteHash}`);
         }
 
         toUpdate.push({ rel, local: l, remote: r, remotePath });
-        log(`${CHANGE} ${pc.yellow("Content changed (Binary):")} ${rel}`);
+        log(`${CHA} ${pc.yellow("Content changed (Binary):")} ${rel}`);
       }
     }
 
@@ -555,16 +579,16 @@ async function main() {
 
     // -------------------------------------------------------------------
     // Phase 5: Execute changes (parallel, worker-based)
-    // -------------------------------------------------------------------
+// -------------------------------------------------------------------
 
     if (!DRY_RUN) {
-      log("\n" + pc.bold(pc.cyan("🚚 Phase 5: Implement changes …")));
+      log("\n" + pc.bold(pc.cyan("🚚 Phase 5: Apply changes …")));
 
       // Upload new files
       await runTasks(
         toAdd,
         CONNECTION.workers,
-        async ({ rel, local: l, remotePath }) => {
+        async ({ local: l, remotePath }) => {
           const remoteDir = path.posix.dirname(remotePath);
           try {
             await sftp.mkdir(remoteDir, true);
@@ -580,7 +604,7 @@ async function main() {
       await runTasks(
         toUpdate,
         CONNECTION.workers,
-        async ({ rel, local: l, remotePath }) => {
+        async ({ local: l, remotePath }) => {
           const remoteDir = path.posix.dirname(remotePath);
           try {
             await sftp.mkdir(remoteDir, true);
@@ -613,9 +637,76 @@ async function main() {
       log(pc.yellow("\n💡 DRY-RUN: No files transferred or deleted."));
     }
 
+    // -------------------------------------------------------------------
+    // Phase 6: optional uploadList / downloadList
+    // -------------------------------------------------------------------
+
+    if (RUN_UPLOAD_LIST && UPLOAD_LIST.length > 0) {
+      log(
+        "\n" + pc.bold(pc.cyan("⬆️  Extra Phase: Upload-List (explicit files) …"))
+      );
+
+      const tasks = UPLOAD_LIST.map((rel) => ({
+        rel,
+        localPath: path.join(CONNECTION.localRoot, rel),
+        remotePath: path.posix.join(CONNECTION.remoteRoot, toPosix(rel)),
+      }));
+
+      if (DRY_RUN) {
+        for (const t of tasks) {
+          log(`   ${ADD} would upload (uploadList): ${t.rel}`);
+        }
+      } else {
+        await runTasks(
+          tasks,
+          CONNECTION.workers,
+          async ({ localPath, remotePath, rel }) => {
+            const remoteDir = path.posix.dirname(remotePath);
+            try {
+              await sftp.mkdir(remoteDir, true);
+            } catch {
+              // ignore
+            }
+            await sftp.put(localPath, remotePath);
+            log(`   ${ADD} uploadList: ${rel}`);
+          },
+          "Upload-List"
+        );
+      }
+    }
+
+    if (RUN_DOWNLOAD_LIST && DOWNLOAD_LIST.length > 0) {
+      log(
+        "\n" + pc.bold(pc.cyan("⬇️  Extra Phase: Download-List (explicit files) …"))
+      );
+
+      const tasks = DOWNLOAD_LIST.map((rel) => ({
+        rel,
+        remotePath: path.posix.join(CONNECTION.remoteRoot, toPosix(rel)),
+        localPath: path.join(CONNECTION.localRoot, rel),
+      }));
+
+      if (DRY_RUN) {
+        for (const t of tasks) {
+          log(`   ${ADD} would download (downloadList): ${t.rel}`);
+        }
+      } else {
+        await runTasks(
+          tasks,
+          CONNECTION.workers,
+          async ({ remotePath, localPath, rel }) => {
+            await fsp.mkdir(path.dirname(localPath), { recursive: true });
+            await sftp.fastGet(remotePath, localPath);
+            log(`   ${ADD} downloadList: ${rel}`);
+          },
+          "Download-List"
+        );
+      }
+    }
+
     const duration = ((Date.now() - start) / 1000).toFixed(2);
 
-    // Write cache securely at the end
+    // Write cache safely at the end
     await saveCache(true);
 
     // Summary
@@ -635,6 +726,7 @@ async function main() {
     }
 
     log("\n" + pc.bold(pc.green("✅ Sync complete.")));
+    log("==================================================================\n\n");
   } catch (err) {
     elog(pc.red("❌ Synchronisation error:"), err);
     process.exitCode = 1;
@@ -646,7 +738,6 @@ async function main() {
   } finally {
     try {
       await sftp.end();
-      log("==================================================================\n\n");
     } catch {
       // ignore
     }

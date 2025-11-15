@@ -40,6 +40,11 @@ import { createHash } from "crypto";
 import { Writable } from "stream";
 import pc from "picocolors";
 
+// get Versionsnummer
+import { createRequire } from "module";
+const require = createRequire(import.meta.url);
+const pkg = require("../package.json");
+
 // Colors for the State (works on dark + light background)
 const ADD = pc.green("+"); // Added
 const CHA = pc.yellow("~"); // Changed
@@ -53,9 +58,13 @@ const EXC = pc.redBright("-"); // Excluded
 const args = process.argv.slice(2);
 const TARGET = args[0];
 const DRY_RUN = args.includes("--dry-run");
-const VERBOSE = args.includes("--verbose") || args.includes("-v");
 const RUN_UPLOAD_LIST = args.includes("--upload-list");
 const RUN_DOWNLOAD_LIST = args.includes("--download-list");
+
+// logLevel override via CLI (optional)
+let cliLogLevel = null;
+if (args.includes("--verbose")) cliLogLevel = "verbose";
+if (args.includes("--laconic")) cliLogLevel = "laconic";
 
 if (!TARGET) {
   console.error(pc.red("❌ Please specify a connection profile:"));
@@ -78,18 +87,18 @@ let CONFIG_RAW;
 try {
   CONFIG_RAW = JSON.parse(await fsp.readFile(CONFIG_PATH, "utf8"));
 } catch (err) {
-  elog(pc.red("❌ Error reading sync.config.json:"), err.message);
+  console.error(pc.red("❌ Error reading sync.config.json:"), err.message);
   process.exit(1);
 }
 
 if (!CONFIG_RAW.connections || typeof CONFIG_RAW.connections !== "object") {
-  elog(pc.red("❌ sync.config.json must have a 'connections' field."));
+  console.error(pc.red("❌ sync.config.json must have a 'connections' field."));
   process.exit(1);
 }
 
 const TARGET_CONFIG = CONFIG_RAW.connections[TARGET];
 if (!TARGET_CONFIG) {
-  elog(pc.red(`❌ Connection '${TARGET}' not found in sync.config.json.`));
+  console.error(pc.red(`❌ Connection '${TARGET}' not found in sync.config.json.`));
   process.exit(1);
 }
 
@@ -103,8 +112,30 @@ const CONNECTION = {
   workers: TARGET_CONFIG.worker ?? 2,
 };
 
+// ---------------------------------------------------------------------------
+// LogLevel + Progress aus Config
+// ---------------------------------------------------------------------------
+
+// logLevel: "verbose", "normal", "laconic"
+let LOG_LEVEL = (CONFIG_RAW.logLevel ?? "normal").toLowerCase();
+
+// CLI-Flags überschreiben Config
+if (cliLogLevel) {
+  LOG_LEVEL = cliLogLevel;
+}
+
+const IS_VERBOSE = LOG_LEVEL === "verbose";
+const IS_LACONIC = LOG_LEVEL === "laconic";
+
+const PROGRESS = CONFIG_RAW.progress ?? {};
+const SCAN_CHUNK = PROGRESS.scanChunk ?? (IS_VERBOSE ? 1 : 100);
+const ANALYZE_CHUNK = PROGRESS.analyzeChunk ?? (IS_VERBOSE ? 1 : 10);
+// Für >100k Files eher 10–50, bei Debug/Fehlersuche 1.
+
+// ---------------------------------------------------------------------------
 // Shared config from JSON
-// Shared config from JSON
+// ---------------------------------------------------------------------------
+
 const INCLUDE = CONFIG_RAW.include ?? [];
 const BASE_EXCLUDE = CONFIG_RAW.exclude ?? [];
 
@@ -113,8 +144,7 @@ function normalizeList(list) {
   if (!Array.isArray(list)) return [];
   return list.flatMap((item) =>
     typeof item === "string"
-      ? // erlaubt: ["a.json, b.json"] -> ["a.json", "b.json"]
-        item
+      ? item
           .split(",")
           .map((s) => s.trim())
           .filter(Boolean)
@@ -144,6 +174,7 @@ const TEXT_EXT = CONFIG_RAW.textExtensions ?? [
   ".md",
   ".svg",
 ];
+
 // Cache file name per connection
 const syncCacheName = TARGET_CONFIG.syncCache || `.sync-cache.${TARGET}.json`;
 const CACHE_PATH = path.resolve(syncCacheName);
@@ -166,7 +197,10 @@ try {
     CACHE.remote = raw.remote ?? {};
   }
 } catch (err) {
-  wlog(pc.yellow("⚠️  Could not load cache, starting without:"), err.message);
+  console.warn(
+    pc.yellow("⚠️  Could not load cache, starting without:"),
+    err.message
+  );
 }
 
 function cacheKey(relPath) {
@@ -217,7 +251,7 @@ function log(...msg) {
 }
 
 function vlog(...msg) {
-  if (!VERBOSE) return;
+  if (!IS_VERBOSE) return;
   clearProgressLine();
   console.log(...msg);
 }
@@ -256,27 +290,67 @@ function isTextFile(relPath) {
   return TEXT_EXT.includes(ext);
 }
 
-// Single-line progress bar
-function updateProgress(prefix, current, total) {
-  const percent = total > 0 ? ((current / total) * 100).toFixed(1) : "0.0";
-  const msg = `${prefix}${current}/${total} Dateien (${percent}%)`;
+function shortenPathForProgress(rel) {
+  if (!rel) return "";
+  // Nur Dateinamen?
+  // return path.basename(rel);
 
+  // Letzte 2 Segmente des Pfades
+  const parts = rel.split("/");
+  if (parts.length === 1) {
+    return rel; // nur Dateiname
+  }
+  if (parts.length === 2) {
+    return rel; // schon kurz genug
+  }
+
+  const last = parts[parts.length - 1];
+  const prev = parts[parts.length - 2];
+
+  // z.B. …/images/foo.jpg
+  return `…/${prev}/${last}`;
+}
+
+// Two-line progress bar
+function updateProgress2(prefix, current, total, rel = "") {
   if (!process.stdout.isTTY) {
-    // Fallback: simply log
-    console.log("   " + msg);
+    // Fallback für Pipes / Logs
+    if (total && total > 0) {
+      const percent = ((current / total) * 100).toFixed(1);
+      console.log(`${prefix}${current}/${total} Dateien (${percent}%) – ${rel}`);
+    } else {
+      console.log(`${prefix}${current} Dateien – ${rel}`);
+    }
     return;
   }
 
   const width = process.stdout.columns || 80;
-  const line = msg.padEnd(width - 1);
+
+  let line1;
+  if (total && total > 0) {
+    const percent = ((current / total) * 100).toFixed(1);
+    line1 = `${prefix}${current}/${total} Dateien (${percent}%)`;
+  } else {
+    // „unknown total“ / Scanner-Modus
+    line1 = `${prefix}${current} Dateien`;
+  }
+
+  // Pfad einkürzen falls nötig (deine bestehende Funktion verwenden)
+  const short = rel ? shortenPathForProgress(rel) : "";
+
+  let line2 = short;
+
+  if (line1.length > width) line1 = line1.slice(0, width - 1);
+  if (line2.length > width) line2 = line2.slice(0, width - 1);
+
+  // zwei Zeilen überschreiben
+  process.stdout.write("\r" + line1.padEnd(width) + "\n");
+  process.stdout.write(line2.padEnd(width));
+
+  // Cursor wieder nach oben (auf die Fortschrittszeile)
+  process.stdout.write("\x1b[1A");
 
   progressActive = true;
-  process.stdout.write("\r" + line);
-
-  if (current === total) {
-    process.stdout.write("\n");
-    progressActive = false;
-  }
 }
 
 // Simple worker pool for parallel tasks
@@ -301,7 +375,7 @@ async function runTasks(items, workerCount, handler, label = "Tasks") {
       }
       done += 1;
       if (done % 10 === 0 || done === total) {
-        updateProgress(`   ${label}: `, done, total);
+        updateProgress2(`   ${label}: `, done, total);
       }
     }
   }
@@ -320,6 +394,7 @@ async function runTasks(items, workerCount, handler, label = "Tasks") {
 
 async function walkLocal(root) {
   const result = new Map();
+  let scanned = 0;
 
   async function recurse(current) {
     const entries = await fsp.readdir(current, { withFileTypes: true });
@@ -329,7 +404,9 @@ async function walkLocal(root) {
         await recurse(full);
       } else if (entry.isFile()) {
         const rel = toPosix(path.relative(root, full));
+
         if (!isIncluded(rel)) continue;
+
         const stat = await fsp.stat(full);
         result.set(rel, {
           rel,
@@ -338,11 +415,26 @@ async function walkLocal(root) {
           mtimeMs: stat.mtimeMs,
           isText: isTextFile(rel),
         });
+
+        scanned += 1;
+        const chunk = IS_VERBOSE ? 1 : SCAN_CHUNK;
+        if (scanned === 1 || scanned % chunk === 0) {
+          // total unbekannt → total = 0 → kein automatisches \n
+          updateProgress2("   Scan local: ", scanned, 0, rel);
+        }
       }
     }
   }
 
   await recurse(root);
+
+  if (scanned > 0) {
+    // letzte Zeile + sauberer Abschluss
+    updateProgress2("   Scan local: ", scanned, 0, "fertig");
+    process.stdout.write("\n");
+    progressActive = false;
+  }
+
   return result;
 }
 
@@ -352,6 +444,7 @@ async function walkLocal(root) {
 
 async function walkRemote(sftp, remoteRoot) {
   const result = new Map();
+  let scanned = 0;
 
   async function recurse(remoteDir, prefix) {
     const items = await sftp.list(remoteDir);
@@ -374,11 +467,24 @@ async function walkRemote(sftp, remoteRoot) {
           size: Number(item.size),
           modifyTime: item.modifyTime ?? 0,
         });
+
+        scanned += 1;
+        const chunk = IS_VERBOSE ? 1 : SCAN_CHUNK;
+        if (scanned === 1 || scanned % chunk === 0) {
+          updateProgress2("   Scan remote: ", scanned, 0, rel);
+        }
       }
     }
   }
 
-  await recurse(remoteRoot, "");
+  await recurse(remoteRoot);
+
+  if (scanned > 0) {
+    updateProgress2("   Scan remote: ", scanned, 0, "fertig");
+    process.stdout.write("\n");
+    progressActive = false;
+  }
+
   return result;
 }
 
@@ -463,7 +569,11 @@ async function main() {
   const start = Date.now();
 
   log("\n\n==================================================================");
-  log(pc.bold("🔐 SFTP Push-Synchronisation: sftp-push-sync"));
+  log(
+    pc.bold(
+      `🔐 SFTP Push-Synchronisation: sftp-push-sync  v${pkg.version}  [logLevel=${LOG_LEVEL}]`
+    )
+  );
   log(`   Connection: ${pc.cyan(TARGET)}  (Worker: ${CONNECTION.workers})`);
   log(`   Host:   ${pc.green(CONNECTION.host)}:${pc.green(CONNECTION.port)}`);
   log(`   Local:  ${pc.green(CONNECTION.localRoot)}`);
@@ -531,28 +641,34 @@ async function main() {
     // Analysis: just decide, don't upload/delete anything yet
     for (const rel of localKeys) {
       checkedCount += 1;
+
+      const chunk = IS_VERBOSE ? 1 : ANALYZE_CHUNK;
       if (
         checkedCount === 1 || // sofortige erste Ausgabe
-        checkedCount % 100 === 0 || // aktualisieren alle 100
-        checkedCount === totalToCheck // letzte Ausgabe immer
+        checkedCount % chunk === 0 ||
+        checkedCount === totalToCheck
       ) {
-        updateProgress("   Analyse: ", checkedCount, totalToCheck);
+        updateProgress2("   Analyse: ", checkedCount, totalToCheck, rel);
       }
+
       const l = local.get(rel);
       const r = remote.get(rel);
-
       const remotePath = path.posix.join(CONNECTION.remoteRoot, rel);
 
       if (!r) {
         toAdd.push({ rel, local: l, remotePath });
-        log(`${ADD} ${pc.green("New:")} ${rel}`);
+        if (!IS_LACONIC) {
+          log(`${ADD} ${pc.green("New:")} ${rel}`);
+        }
         continue;
       }
 
       // 1. size comparison
       if (l.size !== r.size) {
         toUpdate.push({ rel, local: l, remote: r, remotePath });
-        log(`${CHA} ${pc.yellow("Size changed:")} ${rel}`);
+        if (!IS_LACONIC) {
+          log(`${CHA} ${pc.yellow("Size changed:")} ${rel}`);
+        }
         continue;
       }
 
@@ -574,14 +690,16 @@ async function main() {
           continue;
         }
 
-        if (VERBOSE) {
+        if (IS_VERBOSE) {
           const diff = diffWords(remoteStr, localStr);
           const blocks = diff.filter((d) => d.added || d.removed).length;
           vlog(`   ${CHA} Text difference (${blocks} blocks) in ${rel}`);
         }
 
         toUpdate.push({ rel, local: l, remote: r, remotePath });
-        log(`${CHA} ${pc.yellow("Content changed (Text):")} ${rel}`);
+        if (!IS_LACONIC) {
+          log(`${CHA} ${pc.yellow("Content changed (Text):")} ${rel}`);
+        }
       } else {
         // Binary: Hash comparison with cache
         const localMeta = l;
@@ -597,25 +715,27 @@ async function main() {
           continue;
         }
 
-        if (VERBOSE) {
+        if (IS_VERBOSE) {
           vlog(`   ${CHA} Hash different (binary): ${rel}`);
           vlog(`      local:  ${localHash}`);
           vlog(`      remote: ${remoteHash}`);
         }
 
         toUpdate.push({ rel, local: l, remote: r, remotePath });
-        log(`${CHA} ${pc.yellow("Content changed (Binary):")} ${rel}`);
+        if (!IS_LACONIC) {
+          log(`${CHA} ${pc.yellow("Content changed (Binary):")} ${rel}`);
+        }
       }
     }
 
-    log(
-      "\n" + pc.bold(pc.cyan("🧹 Phase 4: Removing orphaned remote files …"))
-    );
+    log("\n" + pc.bold(pc.cyan("🧹 Phase 4: Removing orphaned remote files …")));
     for (const rel of remoteKeys) {
       if (!localKeys.has(rel)) {
         const r = remote.get(rel);
         toDelete.push({ rel, remotePath: r.remotePath });
-        log(`   ${DEL} ${pc.red("Remove:")} ${rel}`);
+        if (!IS_LACONIC) {
+          log(`   ${DEL} ${pc.red("Remove:")} ${rel}`);
+        }
       }
     }
 
@@ -761,7 +881,7 @@ async function main() {
     log(`   ${DEL} Deleted: ${toDelete.length}`);
     if (AUTO_EXCLUDED.size > 0) {
       log(
-        `   ${EXC} Excluded via uploadList | downloadList): ${AUTO_EXCLUDED.size}`
+        `   ${EXC} Excluded via uploadList | downloadList: ${AUTO_EXCLUDED.size}`
       );
     }
     if (toAdd.length || toUpdate.length || toDelete.length) {
@@ -780,9 +900,7 @@ async function main() {
     }
 
     log("\n" + pc.bold(pc.green("✅ Sync complete.")));
-    log(
-      "==================================================================\n\n"
-    );
+    log("==================================================================\n\n");
   } catch (err) {
     elog(pc.red("❌ Synchronisation error:"), err);
     process.exitCode = 1;

@@ -66,6 +66,11 @@ Create a `sync.config.json` in the root folder of your project:
   "textExtensions": [
     ".html", ".xml", ".txt", ".json", ".js", ".css", ".md", ".svg"
   ],
+    "progress": {
+    "scanChunk": 10,
+    "analyzeChunk": 1
+  },
+  "logLevel": "normal", // or: "verbose", "laconic"
   "uploadList": [],
   "downloadList": [
     "download-counter.json"
@@ -84,7 +89,6 @@ A list of files that are excluded from the sync comparison and can be downloaded
   - Relative to remoteRoot "download-counter.json"
   - or e.g. "logs/download-counter.json"
 
-
 ```bash
 # normal synchronisation
 sftp-push-sync staging
@@ -96,6 +100,10 @@ sftp-push-sync staging --upload-list
 sftp-push-sync prod --download-list --dry-run   # view first
 sftp-push-sync prod --download-list             # then do
 ```
+
+### Logging Progress
+
+For >100k files, use ANALYZE_CHUNKS = 10 or 50, otherwise the TTY output itself is a relevant factor.
 
 ## NPM Scripts
 

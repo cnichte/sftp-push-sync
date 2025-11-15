@@ -53,7 +53,8 @@ const EXC = pc.redBright("-"); // Excluded
 
 const hr1 = () => "─".repeat(65); // horizontal line -
 const hr2 = () => "=".repeat(65); // horizontal line =
-const tab_a = () => " ".repeat(3); // indentation for formatting the output.
+const tab_a = () => " ".repeat(3); // indentation for formatting the terminal output.
+const tab_b = () => " ".repeat(6);
 
 // ---------------------------------------------------------------------------
 // CLI arguments
@@ -72,7 +73,7 @@ if (args.includes("--laconic")) cliLogLevel = "laconic";
 
 if (!TARGET) {
   console.error(pc.red("❌ Please specify a connection profile:"));
-  console.error(pc.yellow("   sftp-push-sync staging --dry-run"));
+  console.error(pc.yellow(`${tab_a()}sftp-push-sync staging --dry-run`));
   process.exit(1);
 }
 
@@ -242,8 +243,11 @@ let progressActive = false;
 function clearProgressLine() {
   if (!process.stdout.isTTY || !progressActive) return;
   const width = process.stdout.columns || 80;
-  const blank = " ".repeat(width - 1);
-  process.stdout.write("\r" + blank + "\r");
+  const blank = " ".repeat(width);
+
+  // Beide Progress-Zeilen leeren
+  process.stdout.write("\r" + blank + "\n" + blank + "\r");
+
   progressActive = false;
 }
 
@@ -421,8 +425,8 @@ async function walkLocal(root) {
         scanned += 1;
         const chunk = IS_VERBOSE ? 1 : SCAN_CHUNK;
         if (scanned === 1 || scanned % chunk === 0) {
-          // totally unknown → totally = 0 → no automatic \n
-          updateProgress2("   Scan local: ", scanned, 0, rel);
+          // totally unknown → total = 0 → no automatic \n
+          updateProgress2(`${tab_a()}Scan local: `, scanned, 0, rel);
         }
       }
     }
@@ -432,7 +436,7 @@ async function walkLocal(root) {
 
   if (scanned > 0) {
     // last line + neat finish
-    updateProgress2("   Scan local: ", scanned, 0, "fertig");
+    updateProgress2(`${tab_a()}Scan local: `, scanned, 0, "fertig");
     process.stdout.write("\n");
     progressActive = false;
   }
@@ -473,7 +477,7 @@ async function walkRemote(sftp, remoteRoot) {
         scanned += 1;
         const chunk = IS_VERBOSE ? 1 : SCAN_CHUNK;
         if (scanned === 1 || scanned % chunk === 0) {
-          updateProgress2("   Scan remote: ", scanned, 0, rel);
+          updateProgress2(`${tab_a()}Scan remote: `, scanned, 0, rel);
         }
       }
     }
@@ -482,7 +486,7 @@ async function walkRemote(sftp, remoteRoot) {
   await recurse(remoteRoot);
 
   if (scanned > 0) {
-    updateProgress2("   Scan remote: ", scanned, 0, "fertig");
+    updateProgress2(`${tab_a()}Scan remote: `, scanned, 0, "fertig");
     process.stdout.write("\n");
     progressActive = false;
   }
@@ -616,11 +620,11 @@ async function main() {
     )
   );
   log(`${tab_a()}Connection: ${pc.cyan(TARGET)}`);
-  log(`Worker: ${CONNECTION.workers}`);
-  log(`${tab_a()}Host:   ${pc.green(CONNECTION.host)}:${pc.green(CONNECTION.port)}`);
-  log(`${tab_a()}Local:  ${pc.green(CONNECTION.localRoot)}`);
+  log(`${tab_a()}Worker: ${CONNECTION.workers}`);
+  log(`${tab_a()}Host: ${pc.green(CONNECTION.host)}:${pc.green(CONNECTION.port)}`);
+  log(`${tab_a()}Local: ${pc.green(CONNECTION.localRoot)}`);
   log(`${tab_a()}Remote: ${pc.green(CONNECTION.remoteRoot)}`);
-  if (DRY_RUN) log(pc.yellow("   Mode: DRY-RUN (no changes)"));
+  if (DRY_RUN) log(pc.yellow(`${tab_a()}Mode: DRY-RUN (no changes)`));
   if (RUN_UPLOAD_LIST || RUN_DOWNLOAD_LIST) {
     log(
       pc.blue(
@@ -761,8 +765,8 @@ async function main() {
 
         if (IS_VERBOSE) {
           vlog(`${tab_a()}${CHA} Hash different (binary): ${rel}`);
-          vlog(`${tab_a()}   local:  ${localHash}`);
-          vlog(`${tab_a()}   remote: ${remoteHash}`);
+          vlog(`${tab_b()}local:  ${localHash}`);
+          vlog(`${tab_b()}remote: ${remoteHash}`);
         }
 
         toUpdate.push({ rel, local: l, remote: r, remotePath });
@@ -770,6 +774,11 @@ async function main() {
           log(`${CHA} ${pc.yellow("Content changed (Binary):")} ${rel}`);
         }
       }
+    }
+
+    // Wenn Phase 3 nichts gefunden hat, explizit sagen
+    if (toAdd.length === 0 && toUpdate.length === 0) {
+      log(`${tab_a()}No differences found. Everything is up to date.`);
     }
 
     log(
@@ -783,6 +792,11 @@ async function main() {
           log(`${tab_a()}${DEL} ${pc.red("Remove:")} ${rel}`);
         }
       }
+    }
+
+    // Auch für Phase 4 eine „nix zu tun“-Meldung
+    if (toDelete.length === 0) {
+      log(`${tab_a()}No orphaned remote files found.`);
     }
 
     // -------------------------------------------------------------------

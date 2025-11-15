@@ -2,7 +2,7 @@
 /**
  ** sftp-push-sync.mjs - SFTP Syncronisations Tool
  *
- * @author Carsten Nichte, 2025 / https://carsten-nichte.de
+ * @author Carsten Nichte, 2025 / https://carsten-nichte.de/
  *
  * SFTP push sync with dry run
  * 1. Upload new files
@@ -51,6 +51,10 @@ const CHA = pc.yellow("~"); // Changed
 const DEL = pc.red("-"); // Deleted
 const EXC = pc.redBright("-"); // Excluded
 
+const hr1 = () => "─".repeat(65); // horizontal line -
+const hr2 = () => "=".repeat(65); // horizontal line =
+const tab_a = () => " ".repeat(3); // indentation for formatting the output.
+
 // ---------------------------------------------------------------------------
 // CLI arguments
 // ---------------------------------------------------------------------------
@@ -98,7 +102,9 @@ if (!CONFIG_RAW.connections || typeof CONFIG_RAW.connections !== "object") {
 
 const TARGET_CONFIG = CONFIG_RAW.connections[TARGET];
 if (!TARGET_CONFIG) {
-  console.error(pc.red(`❌ Connection '${TARGET}' not found in sync.config.json.`));
+  console.error(
+    pc.red(`❌ Connection '${TARGET}' not found in sync.config.json.`)
+  );
   process.exit(1);
 }
 
@@ -119,7 +125,7 @@ const CONNECTION = {
 // logLevel: "verbose", "normal", "laconic"
 let LOG_LEVEL = (CONFIG_RAW.logLevel ?? "normal").toLowerCase();
 
-// CLI-Flags überschreiben Config
+// Override config with CLI flags
 if (cliLogLevel) {
   LOG_LEVEL = cliLogLevel;
 }
@@ -130,7 +136,7 @@ const IS_LACONIC = LOG_LEVEL === "laconic";
 const PROGRESS = CONFIG_RAW.progress ?? {};
 const SCAN_CHUNK = PROGRESS.scanChunk ?? (IS_VERBOSE ? 1 : 100);
 const ANALYZE_CHUNK = PROGRESS.analyzeChunk ?? (IS_VERBOSE ? 1 : 10);
-// Für >100k Files eher 10–50, bei Debug/Fehlersuche 1.
+// For >100k files, rather 10–50, for debugging/troubleshooting 1.
 
 // ---------------------------------------------------------------------------
 // Shared config from JSON
@@ -139,7 +145,7 @@ const ANALYZE_CHUNK = PROGRESS.analyzeChunk ?? (IS_VERBOSE ? 1 : 10);
 const INCLUDE = CONFIG_RAW.include ?? [];
 const BASE_EXCLUDE = CONFIG_RAW.exclude ?? [];
 
-// Spezial: Listen für gezielte Uploads / Downloads
+// Special: Lists for targeted uploads/downloads
 function normalizeList(list) {
   if (!Array.isArray(list)) return [];
   return list.flatMap((item) =>
@@ -158,7 +164,7 @@ const DOWNLOAD_LIST = normalizeList(CONFIG_RAW.downloadList ?? []);
 // Effektive Exclude-Liste: explizites exclude + Upload/Download-Listen
 const EXCLUDE = [...BASE_EXCLUDE, ...UPLOAD_LIST, ...DOWNLOAD_LIST];
 
-// Liste ALLER Dateien, die wegen uploadList/downloadList ausgeschlossen wurden
+// List of ALL files that were excluded due to uploadList/downloadList
 const AUTO_EXCLUDED = new Set();
 
 const TEXT_EXT = CONFIG_RAW.textExtensions ?? [
@@ -198,7 +204,7 @@ try {
   }
 } catch (err) {
   console.warn(
-    pc.yellow("⚠️  Could not load cache, starting without:"),
+    pc.yellow("⚠️ Could not load cache, starting without:"),
     err.message
   );
 }
@@ -292,10 +298,6 @@ function isTextFile(relPath) {
 
 function shortenPathForProgress(rel) {
   if (!rel) return "";
-  // Nur Dateinamen?
-  // return path.basename(rel);
-
-  // Letzte 2 Segmente des Pfades
   const parts = rel.split("/");
   if (parts.length === 1) {
     return rel; // nur Dateiname
@@ -317,9 +319,11 @@ function updateProgress2(prefix, current, total, rel = "") {
     // Fallback für Pipes / Logs
     if (total && total > 0) {
       const percent = ((current / total) * 100).toFixed(1);
-      console.log(`${prefix}${current}/${total} Dateien (${percent}%) – ${rel}`);
+      console.log(
+        `${tab_a()}${prefix}${current}/${total} Files (${percent}%) – ${rel}`
+      );
     } else {
-      console.log(`${prefix}${current} Dateien – ${rel}`);
+      console.log(`${tab_a()}${prefix}${current} Files – ${rel}`);
     }
     return;
   }
@@ -329,15 +333,13 @@ function updateProgress2(prefix, current, total, rel = "") {
   let line1;
   if (total && total > 0) {
     const percent = ((current / total) * 100).toFixed(1);
-    line1 = `${prefix}${current}/${total} Dateien (${percent}%)`;
+    line1 = `${tab_a()}${prefix}${current}/${total} Files (${percent}%)`;
   } else {
     // „unknown total“ / Scanner-Modus
-    line1 = `${prefix}${current} Dateien`;
+    line1 = `${tab_a()}${prefix}${current} Files`;
   }
 
-  // Pfad einkürzen falls nötig (deine bestehende Funktion verwenden)
   const short = rel ? shortenPathForProgress(rel) : "";
-
   let line2 = short;
 
   if (line1.length > width) line1 = line1.slice(0, width - 1);
@@ -371,11 +373,11 @@ async function runTasks(items, workerCount, handler, label = "Tasks") {
       try {
         await handler(item);
       } catch (err) {
-        elog(pc.red(`   ⚠️ Error in ${label}:`), err.message || err);
+        elog(pc.red(`${tab_a()}⚠️ Error in ${label}:`), err.message || err);
       }
       done += 1;
       if (done % 10 === 0 || done === total) {
-        updateProgress2(`   ${label}: `, done, total);
+        updateProgress2(`${tab_a()}${label}: `, done, total);
       }
     }
   }
@@ -419,7 +421,7 @@ async function walkLocal(root) {
         scanned += 1;
         const chunk = IS_VERBOSE ? 1 : SCAN_CHUNK;
         if (scanned === 1 || scanned % chunk === 0) {
-          // total unbekannt → total = 0 → kein automatisches \n
+          // totally unknown → totally = 0 → no automatic \n
           updateProgress2("   Scan local: ", scanned, 0, rel);
         }
       }
@@ -429,7 +431,7 @@ async function walkLocal(root) {
   await recurse(root);
 
   if (scanned > 0) {
-    // letzte Zeile + sauberer Abschluss
+    // last line + neat finish
     updateProgress2("   Scan local: ", scanned, 0, "fertig");
     process.stdout.write("\n");
     progressActive = false;
@@ -562,49 +564,91 @@ async function getRemoteHash(rel, meta, sftp) {
 }
 
 // ---------------------------------------------------------------------------
+// SFTP error explanation (for clearer messages)
+// ---------------------------------------------------------------------------
+
+function describeSftpError(err) {
+  if (!err) return "";
+
+  const code = err.code || err.errno || "";
+  const msg = (err.message || "").toLowerCase();
+
+  // Netzwerk / DNS
+  if (code === "ENOTFOUND") {
+    return "Host not found (ENOTFOUND) – Check hostname or DNS entry.";
+  }
+  if (code === "EHOSTUNREACH") {
+    return "Host not reachable (EHOSTUNREACH) – Check network/firewall.";
+  }
+  if (code === "ECONNREFUSED") {
+    return "Connection refused (ECONNREFUSED) – Check the port or SSH service.";
+  }
+  if (code === "ECONNRESET") {
+    return "Connection was reset by the server (ECONNRESET).";
+  }
+  if (code === "ETIMEDOUT") {
+    return "Connection timeout (ETIMEDOUT) – Server is not responding or is blocked.";
+  }
+
+  // Auth / Authorisations
+  if (msg.includes("all configured authentication methods failed")) {
+    return "Authentication failed – check your username/password or SSH keys.";
+  }
+  if (msg.includes("permission denied")) {
+    return "Access denied – check permissions on the server.";
+  }
+
+  // Fallback
+  return "";
+}
+
+// ---------------------------------------------------------------------------
 // MAIN
 // ---------------------------------------------------------------------------
 
 async function main() {
   const start = Date.now();
 
-  log("\n\n==================================================================");
+  log(`\n\n${hr2()}`);
   log(
     pc.bold(
       `🔐 SFTP Push-Synchronisation: sftp-push-sync  v${pkg.version}  [logLevel=${LOG_LEVEL}]`
     )
   );
-  log(`   Connection: ${pc.cyan(TARGET)}  (Worker: ${CONNECTION.workers})`);
-  log(`   Host:   ${pc.green(CONNECTION.host)}:${pc.green(CONNECTION.port)}`);
-  log(`   Local:  ${pc.green(CONNECTION.localRoot)}`);
-  log(`   Remote: ${pc.green(CONNECTION.remoteRoot)}`);
+  log(`${tab_a()}Connection: ${pc.cyan(TARGET)}`);
+  log(`Worker: ${CONNECTION.workers}`);
+  log(`${tab_a()}Host:   ${pc.green(CONNECTION.host)}:${pc.green(CONNECTION.port)}`);
+  log(`${tab_a()}Local:  ${pc.green(CONNECTION.localRoot)}`);
+  log(`${tab_a()}Remote: ${pc.green(CONNECTION.remoteRoot)}`);
   if (DRY_RUN) log(pc.yellow("   Mode: DRY-RUN (no changes)"));
   if (RUN_UPLOAD_LIST || RUN_DOWNLOAD_LIST) {
     log(
       pc.blue(
-        `   Extra: ${RUN_UPLOAD_LIST ? "uploadList " : ""}${
+        `${tab_a()}Extra: ${RUN_UPLOAD_LIST ? "uploadList " : ""}${
           RUN_DOWNLOAD_LIST ? "downloadList" : ""
         }`
       )
     );
   }
-  log("-----------------------------------------------------------------\n");
+  log(`${hr1()}\n`);
 
   const sftp = new SftpClient();
+  let connected = false;
 
   const toAdd = [];
   const toUpdate = [];
   const toDelete = [];
 
   try {
+    log(pc.cyan("🔌 Connecting to SFTP server …"));
     await sftp.connect({
       host: CONNECTION.host,
       port: CONNECTION.port,
       username: CONNECTION.user,
       password: CONNECTION.password,
     });
-
-    vlog(pc.dim("   Connection established."));
+    connected = true;
+    log(pc.green(`${tab_a()}✔ Connected to SFTP.`));
 
     if (!fs.existsSync(CONNECTION.localRoot)) {
       console.error(
@@ -616,20 +660,20 @@ async function main() {
 
     log(pc.bold(pc.cyan("📥 Phase 1: Scan local files …")));
     const local = await walkLocal(CONNECTION.localRoot);
-    log(`   → ${local.size} local files`);
+    log(`${tab_a()}→ ${local.size} local files`);
 
     if (AUTO_EXCLUDED.size > 0) {
       log("");
       log(pc.dim("   Auto-excluded (uploadList/downloadList):"));
       [...AUTO_EXCLUDED].sort().forEach((file) => {
-        log(pc.dim(`      - ${file}`));
+        log(pc.dim(`${tab_a()} - ${file}`));
       });
       log("");
     }
 
     log(pc.bold(pc.cyan("📤 Phase 2: Scan remote files …")));
     const remote = await walkRemote(sftp, CONNECTION.remoteRoot);
-    log(`   → ${remote.size} remote files\n`);
+    log(`${tab_a()}→ ${remote.size} remote files\n`);
 
     const localKeys = new Set(local.keys());
     const remoteKeys = new Set(remote.keys());
@@ -644,7 +688,7 @@ async function main() {
 
       const chunk = IS_VERBOSE ? 1 : ANALYZE_CHUNK;
       if (
-        checkedCount === 1 || // sofortige erste Ausgabe
+        checkedCount === 1 || // immediate first issue
         checkedCount % chunk === 0 ||
         checkedCount === totalToCheck
       ) {
@@ -686,19 +730,19 @@ async function main() {
         ).toString("utf8");
 
         if (localStr === remoteStr) {
-          vlog(`   ${pc.dim("✓ Unchanged (Text):")} ${rel}`);
+          vlog(`${tab_a()}${pc.dim("✓ Unchanged (Text):")} ${rel}`);
           continue;
         }
 
         if (IS_VERBOSE) {
           const diff = diffWords(remoteStr, localStr);
           const blocks = diff.filter((d) => d.added || d.removed).length;
-          vlog(`   ${CHA} Text difference (${blocks} blocks) in ${rel}`);
+          vlog(`${tab_a()}${CHA} Text difference (${blocks} blocks) in ${rel}`);
         }
 
         toUpdate.push({ rel, local: l, remote: r, remotePath });
         if (!IS_LACONIC) {
-          log(`${CHA} ${pc.yellow("Content changed (Text):")} ${rel}`);
+          log(`${tab_a()}${CHA} ${pc.yellow("Content changed (Text):")} ${rel}`);
         }
       } else {
         // Binary: Hash comparison with cache
@@ -711,14 +755,14 @@ async function main() {
         ]);
 
         if (localHash === remoteHash) {
-          vlog(`   ${pc.dim("✓ Unchanged (binary, hash):")} ${rel}`);
+          vlog(`${tab_a()}${pc.dim("✓ Unchanged (binary, hash):")} ${rel}`);
           continue;
         }
 
         if (IS_VERBOSE) {
-          vlog(`   ${CHA} Hash different (binary): ${rel}`);
-          vlog(`      local:  ${localHash}`);
-          vlog(`      remote: ${remoteHash}`);
+          vlog(`${tab_a()}${CHA} Hash different (binary): ${rel}`);
+          vlog(`${tab_a()}   local:  ${localHash}`);
+          vlog(`${tab_a()}   remote: ${remoteHash}`);
         }
 
         toUpdate.push({ rel, local: l, remote: r, remotePath });
@@ -728,13 +772,15 @@ async function main() {
       }
     }
 
-    log("\n" + pc.bold(pc.cyan("🧹 Phase 4: Removing orphaned remote files …")));
+    log(
+      "\n" + pc.bold(pc.cyan("🧹 Phase 4: Removing orphaned remote files …"))
+    );
     for (const rel of remoteKeys) {
       if (!localKeys.has(rel)) {
         const r = remote.get(rel);
         toDelete.push({ rel, remotePath: r.remotePath });
         if (!IS_LACONIC) {
-          log(`   ${DEL} ${pc.red("Remove:")} ${rel}`);
+          log(`${tab_a()}${DEL} ${pc.red("Remove:")} ${rel}`);
         }
       }
     }
@@ -796,7 +842,11 @@ async function main() {
         "Deletes"
       );
     } else {
-      log(pc.yellow("\n💡 DRY-RUN: No files transferred or deleted."));
+      log(
+        pc.yellow(
+          "\n💡 DRY-RUN: Connection tested, no files transferred or deleted."
+        )
+      );
     }
 
     // -------------------------------------------------------------------
@@ -806,7 +856,7 @@ async function main() {
     if (RUN_UPLOAD_LIST && UPLOAD_LIST.length > 0) {
       log(
         "\n" +
-          pc.bold(pc.cyan("⬆️  Extra Phase: Upload-List (explicit files) …"))
+          pc.bold(pc.cyan("⬆️ Extra Phase: Upload-List (explicit files) …"))
       );
 
       const tasks = UPLOAD_LIST.map((rel) => ({
@@ -817,7 +867,7 @@ async function main() {
 
       if (DRY_RUN) {
         for (const t of tasks) {
-          log(`   ${ADD} would upload (uploadList): ${t.rel}`);
+          log(`${tab_a()}${ADD} would upload (uploadList): ${t.rel}`);
         }
       } else {
         await runTasks(
@@ -831,7 +881,7 @@ async function main() {
               // ignore
             }
             await sftp.put(localPath, remotePath);
-            log(`   ${ADD} uploadList: ${rel}`);
+            log(`${tab_a()}${ADD} uploadList: ${rel}`);
           },
           "Upload-List"
         );
@@ -841,7 +891,7 @@ async function main() {
     if (RUN_DOWNLOAD_LIST && DOWNLOAD_LIST.length > 0) {
       log(
         "\n" +
-          pc.bold(pc.cyan("⬇️  Extra Phase: Download-List (explicit files) …"))
+          pc.bold(pc.cyan("⬇️ Extra Phase: Download-List (explicit files) …"))
       );
 
       const tasks = DOWNLOAD_LIST.map((rel) => ({
@@ -852,7 +902,7 @@ async function main() {
 
       if (DRY_RUN) {
         for (const t of tasks) {
-          log(`   ${ADD} would download (downloadList): ${t.rel}`);
+          log(`${tab_a()}${ADD} would download (downloadList): ${t.rel}`);
         }
       } else {
         await runTasks(
@@ -861,7 +911,7 @@ async function main() {
           async ({ remotePath, localPath, rel }) => {
             await fsp.mkdir(path.dirname(localPath), { recursive: true });
             await sftp.fastGet(remotePath, localPath);
-            log(`   ${ADD} downloadList: ${rel}`);
+            log(`${tab_a()}${ADD} downloadList: ${rel}`);
           },
           "Download-List"
         );
@@ -875,34 +925,41 @@ async function main() {
 
     // Summary
     log("\n" + pc.bold(pc.cyan("📊 Summary:")));
-    log(`   Duration: ${pc.green(duration + " s")}`);
-    log(`   ${ADD} Added  : ${toAdd.length}`);
-    log(`   ${CHA} Changed: ${toUpdate.length}`);
-    log(`   ${DEL} Deleted: ${toDelete.length}`);
+    log(`${tab_a()}Duration: ${pc.green(duration + " s")}`);
+    log(`${tab_a()}${ADD} Added  : ${toAdd.length}`);
+    log(`${tab_a()}${CHA} Changed: ${toUpdate.length}`);
+    log(`${tab_a()}${DEL} Deleted: ${toDelete.length}`);
     if (AUTO_EXCLUDED.size > 0) {
       log(
-        `   ${EXC} Excluded via uploadList | downloadList: ${AUTO_EXCLUDED.size}`
+        `${tab_a()}${EXC} Excluded via uploadList | downloadList: ${AUTO_EXCLUDED.size}`
       );
     }
     if (toAdd.length || toUpdate.length || toDelete.length) {
       log("\n📄 Changes:");
       [...toAdd.map((t) => t.rel)]
         .sort()
-        .forEach((f) => console.log(`   ${ADD} ${f}`));
+        .forEach((f) => console.log(`${tab_a()}${ADD} ${f}`));
       [...toUpdate.map((t) => t.rel)]
         .sort()
-        .forEach((f) => console.log(`   ${CHA} ${f}`));
+        .forEach((f) => console.log(`${tab_a()}${CHA} ${f}`));
       [...toDelete.map((t) => t.rel)]
         .sort()
-        .forEach((f) => console.log(`   ${DEL} ${f}`));
+        .forEach((f) => console.log(`${tab_a()}${DEL} ${f}`));
     } else {
       log("\nNo changes.");
     }
 
     log("\n" + pc.bold(pc.green("✅ Sync complete.")));
-    log("==================================================================\n\n");
   } catch (err) {
-    elog(pc.red("❌ Synchronisation error:"), err);
+    const hint = describeSftpError(err);
+    elog(pc.red("❌ Synchronisation error:"), err.message || err);
+    if (hint) {
+      wlog(pc.yellow(`${tab_a()}Mögliche Ursache:`), hint);
+    }
+    if (IS_VERBOSE) {
+      // Vollständiges Error-Objekt nur in verbose anzeigen
+      console.error(err);
+    }
     process.exitCode = 1;
     try {
       await saveCache(true);
@@ -911,11 +968,18 @@ async function main() {
     }
   } finally {
     try {
-      await sftp.end();
-    } catch {
-      // ignore
+      if (connected) {
+        await sftp.end();
+        log(pc.green(`${tab_a()}✔ Connection closed.`));
+      }
+    } catch (e) {
+      wlog(
+        pc.yellow("⚠️ Could not close SFTP connection cleanly:"),
+        e.message || e
+      );
     }
   }
+  log(`${hr2()}\n\n`);
 }
 
 main();

@@ -26,10 +26,16 @@ The file `sftp-push-sync.mjs` is pure JavaScript (ESM), not TypeScript. Node.js 
 ## Install
 
 ```bash
-npm i sftp-push-sync
+npm i -D sftp-push-sync
+# or
+npm install --save-dev sftp-push-sync
+# or
+yarn add --dev sftp-push-sync
+# or
+pnpm add -D sftp-push-sync
 ```
 
-## Config file
+## Setup
 
 Create a `sync.config.json` in the root folder of your project:
 
@@ -58,23 +64,24 @@ Create a `sync.config.json` in the root folder of your project:
     }
   },
   "include": [],
-  "exclude": [
-    "**/.DS_Store",
-    "**/.git/**",
-    "**/node_modules/**"
-  ],
+  "exclude": ["**/.DS_Store", "**/.git/**", "**/node_modules/**"],
   "textExtensions": [
-    ".html", ".xml", ".txt", ".json", ".js", ".css", ".md", ".svg"
+    ".html",
+    ".xml",
+    ".txt",
+    ".json",
+    ".js",
+    ".css",
+    ".md",
+    ".svg"
   ],
-    "progress": {
+  "progress": {
     "scanChunk": 10,
     "analyzeChunk": 1
   },
-  "logLevel": "normal", // or: "verbose", "laconic"
+  "logLevel": "normal",
   "uploadList": [],
-  "downloadList": [
-    "download-counter.json"
-  ]
+  "downloadList": ["download-counter.json"]
 }
 ```
 
@@ -103,7 +110,13 @@ sftp-push-sync prod --download-list             # then do
 
 ### Logging Progress
 
-For >100k files, use ANALYZE_CHUNKS = 10 or 50, otherwise the TTY output itself is a relevant factor.
+Logging can also be configured.
+
+- `logLevel` - normal, verbose, laconic.
+- `scanChunk` - After how many elements should a log output be generated during scanning?
+- `analyzeChunk` - After how many elements should a log output be generated during analysis?
+
+For >100k files, use analyzeChunk = 10 or 50, otherwise the TTY output itself is a relevant factor.
 
 ## NPM Scripts
 

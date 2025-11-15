@@ -25,7 +25,6 @@
  * - For example, log files or other special files.
  * - These files can be downloaded or uploaded separately.
  *
- *
  * The file sftp-push-sync.mjs is pure JavaScript (ESM), not TypeScript.
  * Node.js can execute it directly as long as "type": "module" is specified in package.json
  * or the file has the extension .mjs.
@@ -532,10 +531,13 @@ async function main() {
     // Analysis: just decide, don't upload/delete anything yet
     for (const rel of localKeys) {
       checkedCount += 1;
-      if (checkedCount % 500 === 0 || checkedCount === totalToCheck) {
+      if (
+        checkedCount === 1 || // sofortige erste Ausgabe
+        checkedCount % 100 === 0 || // aktualisieren alle 100
+        checkedCount === totalToCheck // letzte Ausgabe immer
+      ) {
         updateProgress("   Analyse: ", checkedCount, totalToCheck);
       }
-
       const l = local.get(rel);
       const r = remote.get(rel);
 
@@ -758,7 +760,9 @@ async function main() {
     log(`   ${CHA} Changed: ${toUpdate.length}`);
     log(`   ${DEL} Deleted: ${toDelete.length}`);
     if (AUTO_EXCLUDED.size > 0) {
-      log(`   ${EXC} Excluded via uploadList | downloadList): ${AUTO_EXCLUDED.size}`);
+      log(
+        `   ${EXC} Excluded via uploadList | downloadList): ${AUTO_EXCLUDED.size}`
+      );
     }
     if (toAdd.length || toUpdate.length || toDelete.length) {
       log("\n📄 Changes:");

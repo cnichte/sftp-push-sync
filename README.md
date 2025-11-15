@@ -140,6 +140,10 @@ You can safely delete the local cache at any time. The first analysis will then 
 
 The first run always takes a while, especially with lots of images – so be patient! Once the cache is full, it will be faster.
 
+## Example Output
+
+![An console output example](images/example-output-001.png)
+
 ## Links
 
 - <https://www.npmjs.com/package/sftp-push-sync>

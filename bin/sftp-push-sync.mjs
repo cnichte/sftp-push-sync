@@ -55,6 +55,9 @@ const hr1 = () => "─".repeat(65); // horizontal line -
 const hr2 = () => "=".repeat(65); // horizontal line =
 const tab_a = () => " ".repeat(3); // indentation for formatting the terminal output.
 const tab_b = () => " ".repeat(6);
+const cr_a = () => "\n".repeat(1);
+const cr_b = () => "\n".repeat(2);
+
 
 // ---------------------------------------------------------------------------
 // CLI arguments
@@ -246,7 +249,7 @@ function clearProgressLine() {
   const blank = " ".repeat(width);
 
   // Beide Progress-Zeilen leeren
-  process.stdout.write("\r" + blank + "\n" + blank + "\r");
+  process.stdout.write("\r" + blank + cr_a() + blank + "\r");
 
   progressActive = false;
 }
@@ -350,7 +353,7 @@ function updateProgress2(prefix, current, total, rel = "") {
   if (line2.length > width) line2 = line2.slice(0, width - 1);
 
   // zwei Zeilen überschreiben
-  process.stdout.write("\r" + line1.padEnd(width) + "\n");
+  process.stdout.write("\r" + line1.padEnd(width) + cr_a());
   process.stdout.write(line2.padEnd(width));
 
   // Cursor wieder nach oben (auf die Fortschrittszeile)
@@ -437,7 +440,7 @@ async function walkLocal(root) {
   if (scanned > 0) {
     // last line + neat finish
     updateProgress2(`${tab_a()}Scan local: `, scanned, 0, "fertig");
-    process.stdout.write("\n");
+    process.stdout.write(cr_a());
     progressActive = false;
   }
 
@@ -487,7 +490,7 @@ async function walkRemote(sftp, remoteRoot) {
 
   if (scanned > 0) {
     updateProgress2(`${tab_a()}Scan remote: `, scanned, 0, "fertig");
-    process.stdout.write("\n");
+    process.stdout.write(cr_a());
     progressActive = false;
   }
 
@@ -613,7 +616,7 @@ function describeSftpError(err) {
 async function main() {
   const start = Date.now();
 
-  log(`\n\n${hr2()}`);
+  log(`${cr_b()}${hr2()}`);
   log(
     pc.bold(
       `🔐 SFTP Push-Synchronisation: sftp-push-sync  v${pkg.version}  [logLevel=${LOG_LEVEL}]`
@@ -634,7 +637,7 @@ async function main() {
       )
     );
   }
-  log(`${hr1()}\n`);
+  log(`${hr1()}${cr_a()}`);
 
   const sftp = new SftpClient();
   let connected = false;
@@ -662,7 +665,7 @@ async function main() {
       process.exit(1);
     }
 
-    log(pc.bold(pc.cyan("📥 Phase 1: Scan local files …")));
+    log(cr_a() + pc.bold(pc.cyan("📥 Phase 1: Scan local files …")));
     const local = await walkLocal(CONNECTION.localRoot);
     log(`${tab_a()}→ ${local.size} local files`);
 
@@ -675,14 +678,14 @@ async function main() {
       log("");
     }
 
-    log(pc.bold(pc.cyan("📤 Phase 2: Scan remote files …")));
+    log(cr_a() + pc.bold(pc.cyan("📤 Phase 2: Scan remote files …")));
     const remote = await walkRemote(sftp, CONNECTION.remoteRoot);
-    log(`${tab_a()}→ ${remote.size} remote files\n`);
+    log(`${tab_a()}→ ${remote.size} remote files${cr_a()}`);
 
     const localKeys = new Set(local.keys());
     const remoteKeys = new Set(remote.keys());
 
-    log(pc.bold(pc.cyan("🔎 Phase 3: Compare & decide …")));
+    log(cr_a() + pc.bold(pc.cyan("🔎 Phase 3: Compare & decide …")));
     const totalToCheck = localKeys.size;
     let checkedCount = 0;
 
@@ -782,7 +785,7 @@ async function main() {
     }
 
     log(
-      "\n" + pc.bold(pc.cyan("🧹 Phase 4: Removing orphaned remote files …"))
+      cr_a() + pc.bold(pc.cyan("🧹 Phase 4: Removing orphaned remote files …"))
     );
     for (const rel of remoteKeys) {
       if (!localKeys.has(rel)) {
@@ -804,7 +807,7 @@ async function main() {
     // -------------------------------------------------------------------
 
     if (!DRY_RUN) {
-      log("\n" + pc.bold(pc.cyan("🚚 Phase 5: Apply changes …")));
+      log(cr_a() + pc.bold(pc.cyan("🚚 Phase 5: Apply changes …")));
 
       // Upload new files
       await runTasks(
@@ -858,7 +861,7 @@ async function main() {
     } else {
       log(
         pc.yellow(
-          "\n💡 DRY-RUN: Connection tested, no files transferred or deleted."
+          `${cr_a()}💡 DRY-RUN: Connection tested, no files transferred or deleted.`
         )
       );
     }
@@ -869,7 +872,7 @@ async function main() {
 
     if (RUN_UPLOAD_LIST && UPLOAD_LIST.length > 0) {
       log(
-        "\n" +
+        cr_a() +
           pc.bold(pc.cyan("⬆️ Extra Phase: Upload-List (explicit files) …"))
       );
 
@@ -904,7 +907,7 @@ async function main() {
 
     if (RUN_DOWNLOAD_LIST && DOWNLOAD_LIST.length > 0) {
       log(
-        "\n" +
+        cr_a() +
           pc.bold(pc.cyan("⬇️ Extra Phase: Download-List (explicit files) …"))
       );
 
@@ -938,7 +941,8 @@ async function main() {
     await saveCache(true);
 
     // Summary
-    log("\n" + pc.bold(pc.cyan("📊 Summary:")));
+    log(hr1());
+    log(cr_a() + pc.bold(pc.cyan("📊 Summary:")));
     log(`${tab_a()}Duration: ${pc.green(duration + " s")}`);
     log(`${tab_a()}${ADD} Added  : ${toAdd.length}`);
     log(`${tab_a()}${CHA} Changed: ${toUpdate.length}`);
@@ -949,7 +953,7 @@ async function main() {
       );
     }
     if (toAdd.length || toUpdate.length || toDelete.length) {
-      log("\n📄 Changes:");
+      log(`${cr_a()}📄 Changes:`);
       [...toAdd.map((t) => t.rel)]
         .sort()
         .forEach((f) => console.log(`${tab_a()}${ADD} ${f}`));
@@ -960,10 +964,10 @@ async function main() {
         .sort()
         .forEach((f) => console.log(`${tab_a()}${DEL} ${f}`));
     } else {
-      log("\nNo changes.");
+      log(`${cr_a()}No changes.`);
     }
 
-    log("\n" + pc.bold(pc.green("✅ Sync complete.")));
+    log(cr_a() + pc.bold(pc.green("✅ Sync complete.")));
   } catch (err) {
     const hint = describeSftpError(err);
     elog(pc.red("❌ Synchronisation error:"), err.message || err);
@@ -993,7 +997,7 @@ async function main() {
       );
     }
   }
-  log(`${hr2()}\n\n`);
+  log(`${hr2()}${cr_b()}`);
 }
 
 main();

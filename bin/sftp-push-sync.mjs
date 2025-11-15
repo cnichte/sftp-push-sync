@@ -3,12 +3,12 @@
  ** sftp-push-sync.mjs - SFTP Syncronisations Tool
  *
  * @author Carsten Nichte, 2025 / https://carsten-nichte.de
- * 
+ *
  * SFTP push sync with dry run
  * 1. Upload new files
  * 2. Delete remote files that no longer exist locally
  * 3. Detect changes based on size or modified content and upload them
- * 
+ *
  * Features:
  *  - multiple connections in sync.config.json
  *  - dry-run mode
@@ -19,17 +19,18 @@
  *  - Hashes are cached in .sync-cache.json to save space.
  *  - Parallel uploads/deletes via worker pool
  *  - include/exclude patterns
- * 
- * Special cases: 
+ *
+ * Special cases:
  * - Files can be excluded from synchronisation.
  * - For example, log files or other special files.
  * - These files can be downloaded or uploaded separately.
- * 
- * 
+ *
+ *
  * The file sftp-push-sync.mjs is pure JavaScript (ESM), not TypeScript.
- * Node.js can execute it directly as long as "type": "module" is specified in package.json 
+ * Node.js can execute it directly as long as "type": "module" is specified in package.json
  * or the file has the extension .mjs.
  */
+// bin/sftp-push-sync.mjs
 import fs from "fs";
 import fsp from "fs/promises";
 import path from "path";
@@ -41,9 +42,10 @@ import { Writable } from "stream";
 import pc from "picocolors";
 
 // Colors for the State (works on dark + light background)
-const ADD = pc.green("+");  // Added
+const ADD = pc.green("+"); // Added
 const CHA = pc.yellow("~"); // Changed
-const DEL = pc.red("-");    // Deleted
+const DEL = pc.red("-"); // Deleted
+const EXC = pc.redBright("-"); // Excluded
 
 // ---------------------------------------------------------------------------
 // CLI arguments
@@ -103,8 +105,33 @@ const CONNECTION = {
 };
 
 // Shared config from JSON
+// Shared config from JSON
 const INCLUDE = CONFIG_RAW.include ?? [];
-const EXCLUDE = CONFIG_RAW.exclude ?? [];
+const BASE_EXCLUDE = CONFIG_RAW.exclude ?? [];
+
+// Spezial: Listen für gezielte Uploads / Downloads
+function normalizeList(list) {
+  if (!Array.isArray(list)) return [];
+  return list.flatMap((item) =>
+    typeof item === "string"
+      ? // erlaubt: ["a.json, b.json"] -> ["a.json", "b.json"]
+        item
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean)
+      : []
+  );
+}
+
+const UPLOAD_LIST = normalizeList(CONFIG_RAW.uploadList ?? []);
+const DOWNLOAD_LIST = normalizeList(CONFIG_RAW.downloadList ?? []);
+
+// Effektive Exclude-Liste: explizites exclude + Upload/Download-Listen
+const EXCLUDE = [...BASE_EXCLUDE, ...UPLOAD_LIST, ...DOWNLOAD_LIST];
+
+// Liste ALLER Dateien, die wegen uploadList/downloadList ausgeschlossen wurden
+const AUTO_EXCLUDED = new Set();
+
 const TEXT_EXT = CONFIG_RAW.textExtensions ?? [
   ".html",
   ".htm",
@@ -118,14 +145,8 @@ const TEXT_EXT = CONFIG_RAW.textExtensions ?? [
   ".md",
   ".svg",
 ];
-
-// SPECIAL LISTS
-const UPLOAD_LIST = CONFIG_RAW.uploadList ?? [];
-const DOWNLOAD_LIST = CONFIG_RAW.downloadList ?? [];
-
 // Cache file name per connection
-const syncCacheName =
-  TARGET_CONFIG.syncCache || `.sync-cache.${TARGET}.json`;
+const syncCacheName = TARGET_CONFIG.syncCache || `.sync-cache.${TARGET}.json`;
 const CACHE_PATH = path.resolve(syncCacheName);
 
 // ---------------------------------------------------------------------------
@@ -134,7 +155,7 @@ const CACHE_PATH = path.resolve(syncCacheName);
 
 let CACHE = {
   version: 1,
-  local: {},  // key: "<TARGET>:<relPath>" -> { size, mtimeMs, hash }
+  local: {}, // key: "<TARGET>:<relPath>" -> { size, mtimeMs, hash }
   remote: {}, // key: "<TARGET>:<relPath>" -> { size, modifyTime, hash }
 };
 
@@ -214,14 +235,20 @@ function wlog(...msg) {
 
 function matchesAny(patterns, relPath) {
   if (!patterns || patterns.length === 0) return false;
-  return patterns.some((pattern) =>
-    minimatch(relPath, pattern, { dot: true })
-  );
+  return patterns.some((pattern) => minimatch(relPath, pattern, { dot: true }));
 }
 
 function isIncluded(relPath) {
+  // Include-Regeln
   if (INCLUDE.length > 0 && !matchesAny(INCLUDE, relPath)) return false;
-  if (EXCLUDE.length > 0 && matchesAny(EXCLUDE, relPath)) return false;
+  // Exclude-Regeln
+  if (EXCLUDE.length > 0 && matchesAny(EXCLUDE, relPath)) {
+    // Falls durch Upload/Download-Liste → merken
+    if (UPLOAD_LIST.includes(relPath) || DOWNLOAD_LIST.includes(relPath)) {
+      AUTO_EXCLUDED.add(relPath);
+    }
+    return false;
+  }
   return true;
 }
 
@@ -357,7 +384,7 @@ async function walkRemote(sftp, remoteRoot) {
 }
 
 // ---------------------------------------------------------------------------
- // Hash helper for binaries (streaming, memory-efficient)
+// Hash helper for binaries (streaming, memory-efficient)
 // ---------------------------------------------------------------------------
 
 function hashLocalFile(filePath) {
@@ -435,7 +462,7 @@ async function getRemoteHash(rel, meta, sftp) {
 
 async function main() {
   const start = Date.now();
-  
+
   log("\n\n==================================================================");
   log(pc.bold("🔐 SFTP Push-Synchronisation: sftp-push-sync"));
   log(`   Connection: ${pc.cyan(TARGET)}  (Worker: ${CONNECTION.workers})`);
@@ -471,13 +498,25 @@ async function main() {
     vlog(pc.dim("   Connection established."));
 
     if (!fs.existsSync(CONNECTION.localRoot)) {
-      console.error(pc.red("❌ Local root does not exist:"), CONNECTION.localRoot);
+      console.error(
+        pc.red("❌ Local root does not exist:"),
+        CONNECTION.localRoot
+      );
       process.exit(1);
     }
 
     log(pc.bold(pc.cyan("📥 Phase 1: Scan local files …")));
     const local = await walkLocal(CONNECTION.localRoot);
     log(`   → ${local.size} local files`);
+
+    if (AUTO_EXCLUDED.size > 0) {
+      log("");
+      log(pc.dim("   Auto-excluded (uploadList/downloadList):"));
+      [...AUTO_EXCLUDED].sort().forEach((file) => {
+        log(pc.dim(`      - ${file}`));
+      });
+      log("");
+    }
 
     log(pc.bold(pc.cyan("📤 Phase 2: Scan remote files …")));
     const remote = await walkRemote(sftp, CONNECTION.remoteRoot);
@@ -524,9 +563,8 @@ async function main() {
         ]);
 
         const localStr = localBuf.toString("utf8");
-        const remoteStr = (Buffer.isBuffer(remoteBuf)
-          ? remoteBuf
-          : Buffer.from(remoteBuf)
+        const remoteStr = (
+          Buffer.isBuffer(remoteBuf) ? remoteBuf : Buffer.from(remoteBuf)
         ).toString("utf8");
 
         if (localStr === remoteStr) {
@@ -568,7 +606,9 @@ async function main() {
       }
     }
 
-    log("\n" + pc.bold(pc.cyan("🧹 Phase 4: Removing orphaned remote files …")));
+    log(
+      "\n" + pc.bold(pc.cyan("🧹 Phase 4: Removing orphaned remote files …"))
+    );
     for (const rel of remoteKeys) {
       if (!localKeys.has(rel)) {
         const r = remote.get(rel);
@@ -579,7 +619,7 @@ async function main() {
 
     // -------------------------------------------------------------------
     // Phase 5: Execute changes (parallel, worker-based)
-// -------------------------------------------------------------------
+    // -------------------------------------------------------------------
 
     if (!DRY_RUN) {
       log("\n" + pc.bold(pc.cyan("🚚 Phase 5: Apply changes …")));
@@ -643,7 +683,8 @@ async function main() {
 
     if (RUN_UPLOAD_LIST && UPLOAD_LIST.length > 0) {
       log(
-        "\n" + pc.bold(pc.cyan("⬆️  Extra Phase: Upload-List (explicit files) …"))
+        "\n" +
+          pc.bold(pc.cyan("⬆️  Extra Phase: Upload-List (explicit files) …"))
       );
 
       const tasks = UPLOAD_LIST.map((rel) => ({
@@ -677,7 +718,8 @@ async function main() {
 
     if (RUN_DOWNLOAD_LIST && DOWNLOAD_LIST.length > 0) {
       log(
-        "\n" + pc.bold(pc.cyan("⬇️  Extra Phase: Download-List (explicit files) …"))
+        "\n" +
+          pc.bold(pc.cyan("⬇️  Extra Phase: Download-List (explicit files) …"))
       );
 
       const tasks = DOWNLOAD_LIST.map((rel) => ({
@@ -715,18 +757,28 @@ async function main() {
     log(`   ${ADD} Added  : ${toAdd.length}`);
     log(`   ${CHA} Changed: ${toUpdate.length}`);
     log(`   ${DEL} Deleted: ${toDelete.length}`);
-
+    if (AUTO_EXCLUDED.size > 0) {
+      log(`   ${EXC} Excluded via uploadList | downloadList): ${AUTO_EXCLUDED.size}`);
+    }
     if (toAdd.length || toUpdate.length || toDelete.length) {
       log("\n📄 Changes:");
-      [...toAdd.map((t) => t.rel)].sort().forEach((f) => console.log(`   ${ADD} ${f}`));
-      [...toUpdate.map((t) => t.rel)].sort().forEach((f) => console.log(`   ${CHA} ${f}`));
-      [...toDelete.map((t) => t.rel)].sort().forEach((f) => console.log(`   ${DEL} ${f}`));
+      [...toAdd.map((t) => t.rel)]
+        .sort()
+        .forEach((f) => console.log(`   ${ADD} ${f}`));
+      [...toUpdate.map((t) => t.rel)]
+        .sort()
+        .forEach((f) => console.log(`   ${CHA} ${f}`));
+      [...toDelete.map((t) => t.rel)]
+        .sort()
+        .forEach((f) => console.log(`   ${DEL} ${f}`));
     } else {
       log("\nNo changes.");
     }
 
     log("\n" + pc.bold(pc.green("✅ Sync complete.")));
-    log("==================================================================\n\n");
+    log(
+      "==================================================================\n\n"
+    );
   } catch (err) {
     elog(pc.red("❌ Synchronisation error:"), err);
     process.exitCode = 1;

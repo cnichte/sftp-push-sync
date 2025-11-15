@@ -10,8 +10,8 @@ I use the script to transfer [Hugo websites](https://gohugo.io) to the server.
 
 Features:
 
-- multiple connections in sync.config.json
-- dry-run mode
+- multiple connections in `sync.config.json`
+- `dry-run` mode
 - mirrors local → remote
 - adds, updates, deletes files
 - text diff detection
@@ -19,7 +19,8 @@ Features:
 - Hashes are cached in .sync-cache.json to save space.
 - Parallel uploads/deletions via worker pool
 - include/exclude patterns
-  
+- special uploads / downloads
+
 The file `sftp-push-sync.mjs` is pure JavaScript (ESM), not TypeScript. Node.js can execute it directly as long as "type": "module" is specified in package.json or the file has the extension .mjs.
 
 ## Install
@@ -65,23 +66,23 @@ Create a `sync.config.json` in the root folder of your project:
   "textExtensions": [
     ".html", ".xml", ".txt", ".json", ".js", ".css", ".md", ".svg"
   ],
-    "uploadList": [
-    "download-files.json"
-  ],
+  "uploadList": [],
   "downloadList": [
     "download-counter.json"
   ]
 }
 ```
 
-### special cases
+### special uploads / downloads
 
-- uploadList
-  - Relativ zu localRoot "download-files.json"
-  - oder mit Unterordnern: "data/download-files.json"
-- downloadList
-  - Relativ zu remoteRoot "download-counter.json"
-  - oder zB. "logs/download-counter.json"
+A list of files that are excluded from the sync comparison and can be downloaded or uploaded separately.
+
+- `uploadList`
+  - Relative to localRoot "downloads.json"
+  - or with subfolders: "data/downloads.json"
+- `downloadList`
+  - Relative to remoteRoot "download-counter.json"
+  - or e.g. "logs/download-counter.json"
 
 
 ```bash
@@ -92,8 +93,8 @@ sftp-push-sync staging
 sftp-push-sync staging --upload-list
 
 # just fetch the download list from the server (combined with normal synchronisation)
-sftp-push-sync prod --download-list --dry-run   # erst ansehen
-sftp-push-sync prod --download-list             # dann machen
+sftp-push-sync prod --download-list --dry-run   # view first
+sftp-push-sync prod --download-list             # then do
 ```
 
 ## NPM Scripts
@@ -134,9 +135,7 @@ The dry run is a great way to compare files and fill the cache.
 
 - The cache files: `.sync-cache.*.json`
 
-You can safely delete the local cache at any time. The first analysis will then take longer again (because remote hashes will be streamed again). After that, everything will run extremely fast again.
-
-## special features
+You can safely delete the local cache at any time. The first analysis will then take longer again (because remote hashes will be streamed again). After that, everything will run fast.
 
 The first run always takes a while, especially with lots of images – so be patient! Once the cache is full, it will be faster.
 

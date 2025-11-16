@@ -48,16 +48,13 @@ const pkg = require("../package.json");
 // Colors for the State (works on dark + light background)
 const ADD = pc.green("+"); // Added
 const CHA = pc.yellow("~"); // Changed
-const DEL = pc.red("-"); // Deleted
+const DEL = pc.red("-");   // Deleted
 const EXC = pc.redBright("-"); // Excluded
 
 const hr1 = () => "─".repeat(65); // horizontal line -
 const hr2 = () => "=".repeat(65); // horizontal line =
 const tab_a = () => " ".repeat(3); // indentation for formatting the terminal output.
 const tab_b = () => " ".repeat(6);
-const cr_a = () => "\n".repeat(1);
-const cr_b = () => "\n".repeat(2);
-
 
 // ---------------------------------------------------------------------------
 // CLI arguments
@@ -195,7 +192,7 @@ const CACHE_PATH = path.resolve(syncCacheName);
 
 let CACHE = {
   version: 1,
-  local: {}, // key: "<TARGET>:<relPath>" -> { size, mtimeMs, hash }
+  local: {},  // key: "<TARGET>:<relPath>" -> { size, mtimeMs, hash }
   remote: {}, // key: "<TARGET>:<relPath>" -> { size, modifyTime, hash }
 };
 
@@ -245,11 +242,14 @@ let progressActive = false;
 
 function clearProgressLine() {
   if (!process.stdout.isTTY || !progressActive) return;
-  const width = process.stdout.columns || 80;
-  const blank = " ".repeat(width);
 
-  // Beide Progress-Zeilen leeren
-  process.stdout.write("\r" + blank + cr_a() + blank + "\r");
+  // Zwei Progress-Zeilen ohne zusätzliche Newlines leeren:
+  // Cursor steht nach updateProgress2() auf der ersten Zeile.
+  process.stdout.write("\r");      // an Zeilenanfang
+  process.stdout.write("\x1b[2K"); // erste Zeile löschen
+  process.stdout.write("\x1b[1B"); // eine Zeile nach unten
+  process.stdout.write("\x1b[2K"); // zweite Zeile löschen
+  process.stdout.write("\x1b[1A"); // wieder nach oben
 
   progressActive = false;
 }
@@ -353,7 +353,7 @@ function updateProgress2(prefix, current, total, rel = "") {
   if (line2.length > width) line2 = line2.slice(0, width - 1);
 
   // zwei Zeilen überschreiben
-  process.stdout.write("\r" + line1.padEnd(width) + cr_a());
+  process.stdout.write("\r" + line1.padEnd(width) + "\n");
   process.stdout.write(line2.padEnd(width));
 
   // Cursor wieder nach oben (auf die Fortschrittszeile)
@@ -384,7 +384,7 @@ async function runTasks(items, workerCount, handler, label = "Tasks") {
       }
       done += 1;
       if (done % 10 === 0 || done === total) {
-        updateProgress2(`${tab_a()}${label}: `, done, total);
+        updateProgress2(`${label}: `, done, total);
       }
     }
   }
@@ -429,7 +429,7 @@ async function walkLocal(root) {
         const chunk = IS_VERBOSE ? 1 : SCAN_CHUNK;
         if (scanned === 1 || scanned % chunk === 0) {
           // totally unknown → total = 0 → no automatic \n
-          updateProgress2(`${tab_a()}Scan local: `, scanned, 0, rel);
+          updateProgress2("Scan local: ", scanned, 0, rel);
         }
       }
     }
@@ -439,8 +439,8 @@ async function walkLocal(root) {
 
   if (scanned > 0) {
     // last line + neat finish
-    updateProgress2(`${tab_a()}Scan local: `, scanned, 0, "fertig");
-    process.stdout.write(cr_a());
+    updateProgress2("Scan local: ", scanned, 0, "fertig");
+    process.stdout.write("\n");
     progressActive = false;
   }
 
@@ -480,17 +480,17 @@ async function walkRemote(sftp, remoteRoot) {
         scanned += 1;
         const chunk = IS_VERBOSE ? 1 : SCAN_CHUNK;
         if (scanned === 1 || scanned % chunk === 0) {
-          updateProgress2(`${tab_a()}Scan remote: `, scanned, 0, rel);
+          updateProgress2("Scan remote: ", scanned, 0, rel);
         }
       }
     }
   }
 
-  await recurse(remoteRoot);
+  await recurse(remoteRoot, "");
 
   if (scanned > 0) {
-    updateProgress2(`${tab_a()}Scan remote: `, scanned, 0, "fertig");
-    process.stdout.write(cr_a());
+    updateProgress2("Scan remote: ", scanned, 0, "fertig");
+    process.stdout.write("\n");
     progressActive = false;
   }
 
@@ -616,7 +616,8 @@ function describeSftpError(err) {
 async function main() {
   const start = Date.now();
 
-  log(`${cr_b()}${hr2()}`);
+  // Header-Abstand wie gehabt: zwei Leerzeilen davor
+  log("\n\n" + hr2());
   log(
     pc.bold(
       `🔐 SFTP Push-Synchronisation: sftp-push-sync  v${pkg.version}  [logLevel=${LOG_LEVEL}]`
@@ -637,7 +638,7 @@ async function main() {
       )
     );
   }
-  log(`${hr1()}${cr_a()}`);
+  log(hr1());
 
   const sftp = new SftpClient();
   let connected = false;
@@ -647,6 +648,7 @@ async function main() {
   const toDelete = [];
 
   try {
+    log("");
     log(pc.cyan("🔌 Connecting to SFTP server …"));
     await sftp.connect({
       host: CONNECTION.host,
@@ -665,7 +667,9 @@ async function main() {
       process.exit(1);
     }
 
-    log(cr_a() + pc.bold(pc.cyan("📥 Phase 1: Scan local files …")));
+    // Phase 1 – mit exakt einer Leerzeile davor
+    log("");
+    log(pc.bold(pc.cyan("📥 Phase 1: Scan local files …")));
     const local = await walkLocal(CONNECTION.localRoot);
     log(`${tab_a()}→ ${local.size} local files`);
 
@@ -678,14 +682,17 @@ async function main() {
       log("");
     }
 
-    log(cr_a() + pc.bold(pc.cyan("📤 Phase 2: Scan remote files …")));
+    // Phase 2 – auch mit einer Leerzeile davor
+    log("");
+    log(pc.bold(pc.cyan("📤 Phase 2: Scan remote files …")));
     const remote = await walkRemote(sftp, CONNECTION.remoteRoot);
-    log(`${tab_a()}→ ${remote.size} remote files${cr_a()}`);
+    log(`${tab_a()}→ ${remote.size} remote files`);
+    log("");
 
     const localKeys = new Set(local.keys());
     const remoteKeys = new Set(remote.keys());
 
-    log(cr_a() + pc.bold(pc.cyan("🔎 Phase 3: Compare & decide …")));
+    log(pc.bold(pc.cyan("🔎 Phase 3: Compare & decide …")));
     const totalToCheck = localKeys.size;
     let checkedCount = 0;
 
@@ -699,7 +706,7 @@ async function main() {
         checkedCount % chunk === 0 ||
         checkedCount === totalToCheck
       ) {
-        updateProgress2("   Analyse: ", checkedCount, totalToCheck, rel);
+        updateProgress2("Analyse: ", checkedCount, totalToCheck, rel);
       }
 
       const l = local.get(rel);
@@ -781,12 +788,12 @@ async function main() {
 
     // Wenn Phase 3 nichts gefunden hat, explizit sagen
     if (toAdd.length === 0 && toUpdate.length === 0) {
+      log("");
       log(`${tab_a()}No differences found. Everything is up to date.`);
     }
 
-    log(
-      cr_a() + pc.bold(pc.cyan("🧹 Phase 4: Removing orphaned remote files …"))
-    );
+    log("");
+    log(pc.bold(pc.cyan("🧹 Phase 4: Removing orphaned remote files …")));
     for (const rel of remoteKeys) {
       if (!localKeys.has(rel)) {
         const r = remote.get(rel);
@@ -807,7 +814,8 @@ async function main() {
     // -------------------------------------------------------------------
 
     if (!DRY_RUN) {
-      log(cr_a() + pc.bold(pc.cyan("🚚 Phase 5: Apply changes …")));
+      log("");
+      log(pc.bold(pc.cyan("🚚 Phase 5: Apply changes …")));
 
       // Upload new files
       await runTasks(
@@ -859,80 +867,12 @@ async function main() {
         "Deletes"
       );
     } else {
+      log("");
       log(
         pc.yellow(
-          `${cr_a()}💡 DRY-RUN: Connection tested, no files transferred or deleted.`
+          "💡 DRY-RUN: Connection tested, no files transferred or deleted."
         )
       );
-    }
-
-    // -------------------------------------------------------------------
-    // Phase 6: optional uploadList / downloadList
-    // -------------------------------------------------------------------
-
-    if (RUN_UPLOAD_LIST && UPLOAD_LIST.length > 0) {
-      log(
-        cr_a() +
-          pc.bold(pc.cyan("⬆️ Extra Phase: Upload-List (explicit files) …"))
-      );
-
-      const tasks = UPLOAD_LIST.map((rel) => ({
-        rel,
-        localPath: path.join(CONNECTION.localRoot, rel),
-        remotePath: path.posix.join(CONNECTION.remoteRoot, toPosix(rel)),
-      }));
-
-      if (DRY_RUN) {
-        for (const t of tasks) {
-          log(`${tab_a()}${ADD} would upload (uploadList): ${t.rel}`);
-        }
-      } else {
-        await runTasks(
-          tasks,
-          CONNECTION.workers,
-          async ({ localPath, remotePath, rel }) => {
-            const remoteDir = path.posix.dirname(remotePath);
-            try {
-              await sftp.mkdir(remoteDir, true);
-            } catch {
-              // ignore
-            }
-            await sftp.put(localPath, remotePath);
-            log(`${tab_a()}${ADD} uploadList: ${rel}`);
-          },
-          "Upload-List"
-        );
-      }
-    }
-
-    if (RUN_DOWNLOAD_LIST && DOWNLOAD_LIST.length > 0) {
-      log(
-        cr_a() +
-          pc.bold(pc.cyan("⬇️ Extra Phase: Download-List (explicit files) …"))
-      );
-
-      const tasks = DOWNLOAD_LIST.map((rel) => ({
-        rel,
-        remotePath: path.posix.join(CONNECTION.remoteRoot, toPosix(rel)),
-        localPath: path.join(CONNECTION.localRoot, rel),
-      }));
-
-      if (DRY_RUN) {
-        for (const t of tasks) {
-          log(`${tab_a()}${ADD} would download (downloadList): ${t.rel}`);
-        }
-      } else {
-        await runTasks(
-          tasks,
-          CONNECTION.workers,
-          async ({ remotePath, localPath, rel }) => {
-            await fsp.mkdir(path.dirname(localPath), { recursive: true });
-            await sftp.fastGet(remotePath, localPath);
-            log(`${tab_a()}${ADD} downloadList: ${rel}`);
-          },
-          "Download-List"
-        );
-      }
     }
 
     const duration = ((Date.now() - start) / 1000).toFixed(2);
@@ -942,7 +882,8 @@ async function main() {
 
     // Summary
     log(hr1());
-    log(cr_a() + pc.bold(pc.cyan("📊 Summary:")));
+    log("");
+    log(pc.bold(pc.cyan("📊 Summary:")));
     log(`${tab_a()}Duration: ${pc.green(duration + " s")}`);
     log(`${tab_a()}${ADD} Added  : ${toAdd.length}`);
     log(`${tab_a()}${CHA} Changed: ${toUpdate.length}`);
@@ -953,7 +894,8 @@ async function main() {
       );
     }
     if (toAdd.length || toUpdate.length || toDelete.length) {
-      log(`${cr_a()}📄 Changes:`);
+      log("");
+      log("📄 Changes:");
       [...toAdd.map((t) => t.rel)]
         .sort()
         .forEach((f) => console.log(`${tab_a()}${ADD} ${f}`));
@@ -964,10 +906,12 @@ async function main() {
         .sort()
         .forEach((f) => console.log(`${tab_a()}${DEL} ${f}`));
     } else {
-      log(`${cr_a()}No changes.`);
+      log("");
+      log("No changes.");
     }
 
-    log(cr_a() + pc.bold(pc.green("✅ Sync complete.")));
+    log("");
+    log(pc.bold(pc.green("✅ Sync complete.")));
   } catch (err) {
     const hint = describeSftpError(err);
     elog(pc.red("❌ Synchronisation error:"), err.message || err);
@@ -997,7 +941,10 @@ async function main() {
       );
     }
   }
-  log(`${hr2()}${cr_b()}`);
+
+  // Abschlusslinie + eine Leerzeile dahinter
+  log(hr2());
+  log("");
 }
 
 main();

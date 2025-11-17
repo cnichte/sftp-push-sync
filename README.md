@@ -65,60 +65,36 @@ Create a `sync.config.json` in the root folder of your project:
   },
   "include": [],
   "exclude": ["**/.DS_Store", "**/.git/**", "**/node_modules/**"],
-  "textExtensions": [
-    ".html",
-    ".xml",
-    ".txt",
-    ".json",
-    ".js",
-    ".css",
-    ".md",
-    ".svg"
-  ],
+  "textExtensions": [".html",".xml",".txt",".json",".js",".css",".md",".svg"],
+  "mediaExtensions": [".jpg",".jpeg",".png",".webp",".gif",".avif",".tif",".tiff",".mp4",".mov",".m4v","mp3",".wav",".flac"],
   "progress": {
     "scanChunk": 10,
     "analyzeChunk": 1
   },
   "logLevel": "normal",
+  "logFile": ".sftp-push-sync.{target}.log",
   "uploadList": [],
   "downloadList": ["download-counter.json"]
 }
 ```
 
-### special uploads / downloads
-
-A list of files that are excluded from the sync comparison and can be downloaded or uploaded separately.
-
-- `uploadList`
-  - Relative to localRoot "downloads.json"
-  - or with subfolders: "data/downloads.json"
-- `downloadList`
-  - Relative to remoteRoot "download-counter.json"
-  - or e.g. "logs/download-counter.json"
+### CLI Usage
 
 ```bash
-# normal synchronisation
-sftp-push-sync staging
+# Normal synchronisation
+node bin/sftp-push-sync.mjs staging
 
-# Normal synchronisation + explicitly transfer upload list
-sftp-push-sync staging --upload-list
+# Consider normal synchronisation + upload list
+node bin/sftp-push-sync.mjs staging --upload-list
 
-# just fetch the download list from the server (combined with normal synchronisation)
-sftp-push-sync prod --download-list --dry-run   # view first
-sftp-push-sync prod --download-list             # then do
+# Only lists, no standard synchronisation
+node bin/sftp-push-sync.mjs staging --skip-sync --upload-list
+node bin/sftp-push-sync.mjs staging --skip-sync --download-list
+node bin/sftp-push-sync.mjs staging --skip-sync --upload-list --download-list
+
+# (optional) only run lists dry
+node bin/sftp-push-sync.mjs staging --skip-sync --upload-list --dry-run
 ```
-
-### Logging Progress
-
-Logging can also be configured.
-
-- `logLevel` - normal, verbose, laconic.
-- `scanChunk` - After how many elements should a log output be generated during scanning?
-- `analyzeChunk` - After how many elements should a log output be generated during analysis?
-
-For >100k files, use analyzeChunk = 10 or 50, otherwise the TTY output itself is a relevant factor.
-
-## NPM Scripts
 
 - Can be conveniently started via the scripts in `package.json`:
 
@@ -148,6 +124,74 @@ If you have stored the scripts in `package.json` as follows:
 
 The dry run is a great way to compare files and fill the cache.
 
+
+### special uploads / downloads
+
+A list of files that are excluded from the sync comparison and can be downloaded or uploaded separately.
+
+- `uploadList`
+  - Relative to localRoot "downloads.json"
+  - or with subfolders: "data/downloads.json"
+- `downloadList`
+  - Relative to remoteRoot "download-counter.json"
+  - or e.g. "logs/download-counter.json"
+
+```bash
+# normal synchronisation
+sftp-push-sync staging
+
+# Normal synchronisation + explicitly transfer upload list
+sftp-push-sync staging --upload-list
+
+# just fetch the download list from the server (combined with normal synchronisation)
+sftp-push-sync prod --download-list --dry-run   # view first
+sftp-push-sync prod --download-list             # then do
+```
+
+### Logging Progress
+
+Logging can also be configured.
+
+- `logLevel` - normal, verbose, laconic.
+- `logFile` - an optional logFile.
+- `scanChunk` - After how many elements should a log output be generated during scanning?
+- `analyzeChunk` - After how many elements should a log output be generated during analysis?
+
+For >100k files, use analyzeChunk = 10 or 50, otherwise the TTY output itself is a relevant factor.
+
+### Wildcards
+
+Examples for Wirdcards for `include`, `exclude`, `uploadList` and `downloadList`:
+
+- `"content/**"` - ALLES unterhalb von `content/`
+- `".html", ".htm", ".md", ".txt", ".json"`- Nur bestimmte Dateiendungen
+- `"**/*.html"` - alle HTML-Dateien
+- `"**/*.md"`- alle Markdown-Dateien
+- `"content/**/*.md"` - nur Markdown in `content/`
+- `"static/images/**/*.jpg"`
+- `"**/thumb-*.*"` - thumb-Bilder überall
+- `"**/*-draft.*"` - Dateien mit -draft vor der Extension
+- `"content/**/*.md"` - alle Markdown-Dateien
+- `"config/**"` - komplette Konfiguration
+- `"static/images/covers/**"`- nur Cover-Bilder
+- `"logs/**/*.log"` - alle Logs aus logs/
+- `"reports/**/*.xlsx"`
+
+practical excludes:
+
+```txt
+"exclude": [
+  ".git/**",           // kompletter .git Ordner
+  ".idea/**",          // JetBrains
+  "node_modules/**",   // Node dependencies
+  "dist/**",           // Build Output
+  "**/*.map",          // Source Maps
+  "**/~*",             // Emacs/Editor-Backups (~Dateien)
+  "**/#*#",            // weitere Editor-Backups
+  "**/.DS_Store"       // macOS Trash
+]
+```
+
 ## Which files are needed?
 
 - `sync.config.json` - The configuration file (with passwords in plain text, so please leave it out of the git repository)
@@ -155,10 +199,11 @@ The dry run is a great way to compare files and fill the cache.
 ## Which files are created?
 
 - The cache files: `.sync-cache.*.json`
+- The log file: `.sftp-push-sync.{target}.log` (Optional, overwritten with each run)
 
-You can safely delete the local cache at any time. The first analysis will then take longer again (because remote hashes will be streamed again). After that, everything will run fast.
+You can safely delete the local cache at any time. The first analysis will then take longer again, because remote hashes will be streamed again. After that, everything will run fast.
 
-The first run always takes a while, especially with lots of images – so be patient! Once the cache is full, it will be faster.
+Note: The first run always takes a while, especially with lots of images – so be patient! Once the cache is full, it will be faster.
 
 ## Example Output
 

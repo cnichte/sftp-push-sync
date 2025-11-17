@@ -48,7 +48,7 @@ const pkg = require("../package.json");
 // Colors for the State (works on dark + light background)
 const ADD = pc.green("+"); // Added
 const CHA = pc.yellow("~"); // Changed
-const DEL = pc.red("-");   // Deleted
+const DEL = pc.red("-"); // Deleted
 const EXC = pc.redBright("-"); // Excluded
 
 const hr1 = () => "─".repeat(65); // horizontal line -
@@ -65,6 +65,7 @@ const TARGET = args[0];
 const DRY_RUN = args.includes("--dry-run");
 const RUN_UPLOAD_LIST = args.includes("--upload-list");
 const RUN_DOWNLOAD_LIST = args.includes("--download-list");
+const SKIP_SYNC = args.includes("--skip-sync");
 
 // logLevel override via CLI (optional)
 let cliLogLevel = null;
@@ -74,6 +75,14 @@ if (args.includes("--laconic")) cliLogLevel = "laconic";
 if (!TARGET) {
   console.error(pc.red("❌ Please specify a connection profile:"));
   console.error(pc.yellow(`${tab_a()}sftp-push-sync staging --dry-run`));
+  process.exit(1);
+}
+
+// Wenn jemand --skip-sync ohne Listen benutzt → sinnlos, also abbrechen
+if (SKIP_SYNC && !RUN_UPLOAD_LIST && !RUN_DOWNLOAD_LIST) {
+  console.error(
+    pc.red("❌ --skip-sync requires at least --upload-list or --download-list.")
+  );
   process.exit(1);
 }
 
@@ -100,6 +109,93 @@ if (!CONFIG_RAW.connections || typeof CONFIG_RAW.connections !== "object") {
   console.error(pc.red("❌ sync.config.json must have a 'connections' field."));
   process.exit(1);
 }
+
+// ---------------------------------------------------------------------------
+// Logging helpers (Terminal + optional Logfile)
+// ---------------------------------------------------------------------------
+// Default: .sync.{TARGET}.log, kann via config.logFile überschrieben werden
+const DEFAULT_LOG_FILE = `.sync.${TARGET}.log`;
+const rawLogFilePattern = CONFIG_RAW.logFile || DEFAULT_LOG_FILE;
+const LOG_FILE = path.resolve(
+  rawLogFilePattern.replace("{target}", TARGET)
+);
+let LOG_STREAM = null;
+
+/** einmalig Logfile-Stream öffnen */
+function openLogFile() {
+  if (!LOG_FILE) return;
+  if (!LOG_STREAM) {
+    LOG_STREAM = fs.createWriteStream(LOG_FILE, {
+      flags: "w", // pro Lauf überschreiben
+      encoding: "utf8",
+    });
+  }
+}
+
+/** eine fertige Zeile ins Logfile schreiben (ohne Einfluss auf Terminal) */
+function writeLogLine(line) {
+  if (!LOG_STREAM) return;
+  // ANSI-Farbsequenzen aus der Log-Zeile entfernen
+  const clean =
+    typeof line === "string"
+      ? line.replace(/\x1b\[[0-9;]*m/g, "")
+      : String(line).replace(/\x1b\[[0-9;]*m/g, "");
+  try {
+    LOG_STREAM.write(clean + "\n");
+  } catch {
+    // falls Stream schon zu ist, einfach ignorieren – verhindert ERR_STREAM_WRITE_AFTER_END
+  }
+}
+
+/** Konsole + Logfile (normal) */
+function rawConsoleLog(...msg) {
+  clearProgressLine();
+  console.log(...msg);
+  const line = msg
+    .map((m) => (typeof m === "string" ? m : String(m)))
+    .join(" ");
+  writeLogLine(line);
+}
+
+function rawConsoleError(...msg) {
+  clearProgressLine();
+  console.error(...msg);
+  const line = msg
+    .map((m) => (typeof m === "string" ? m : String(m)))
+    .join(" ");
+  writeLogLine("[ERROR] " + line);
+}
+
+function rawConsoleWarn(...msg) {
+  clearProgressLine();
+  console.warn(...msg);
+  const line = msg
+    .map((m) => (typeof m === "string" ? m : String(m)))
+    .join(" ");
+  writeLogLine("[WARN] " + line);
+}
+
+// High-level Helfer, die du überall im Script schon verwendest:
+function log(...msg) {
+  rawConsoleLog(...msg);
+}
+
+function vlog(...msg) {
+  if (!IS_VERBOSE) return;
+  rawConsoleLog(...msg);
+}
+
+function elog(...msg) {
+  rawConsoleError(...msg);
+}
+
+function wlog(...msg) {
+  rawConsoleWarn(...msg);
+}
+
+// ---------------------------------------------------------------------------
+// Connection
+// ---------------------------------------------------------------------------
 
 const TARGET_CONFIG = CONFIG_RAW.connections[TARGET];
 if (!TARGET_CONFIG) {
@@ -146,6 +242,38 @@ const ANALYZE_CHUNK = PROGRESS.analyzeChunk ?? (IS_VERBOSE ? 1 : 10);
 const INCLUDE = CONFIG_RAW.include ?? [];
 const BASE_EXCLUDE = CONFIG_RAW.exclude ?? [];
 
+// textExtensions
+const TEXT_EXT = CONFIG_RAW.textExtensions ?? [
+  ".html",
+  ".htm",
+  ".xml",
+  ".txt",
+  ".json",
+  ".js",
+  ".mjs",
+  ".cjs",
+  ".css",
+  ".md",
+  ".svg",
+];
+
+// mediaExtensions – aktuell nur Meta, aber schon konfigurierbar
+const MEDIA_EXT = CONFIG_RAW.mediaExtensions ?? [
+  ".jpg",
+  ".jpeg",
+  ".png",
+  ".gif",
+  ".webp",
+  ".avif",
+  ".mp4",
+  ".mov",
+  ".mp3",
+  ".wav",
+  ".ogg",
+  ".flac",
+  ".pdf",
+];
+
 // Special: Lists for targeted uploads/downloads
 function normalizeList(list) {
   if (!Array.isArray(list)) return [];
@@ -163,24 +291,12 @@ const UPLOAD_LIST = normalizeList(CONFIG_RAW.uploadList ?? []);
 const DOWNLOAD_LIST = normalizeList(CONFIG_RAW.downloadList ?? []);
 
 // Effektive Exclude-Liste: explizites exclude + Upload/Download-Listen
+// → diese Dateien werden im „normalen“ Sync nicht angerührt,
+//   sondern nur über die Bypass-Mechanik behandelt.
 const EXCLUDE = [...BASE_EXCLUDE, ...UPLOAD_LIST, ...DOWNLOAD_LIST];
 
 // List of ALL files that were excluded due to uploadList/downloadList
 const AUTO_EXCLUDED = new Set();
-
-const TEXT_EXT = CONFIG_RAW.textExtensions ?? [
-  ".html",
-  ".htm",
-  ".xml",
-  ".txt",
-  ".json",
-  ".js",
-  ".mjs",
-  ".cjs",
-  ".css",
-  ".md",
-  ".svg",
-];
 
 // Cache file name per connection
 const syncCacheName = TARGET_CONFIG.syncCache || `.sync-cache.${TARGET}.json`;
@@ -192,7 +308,7 @@ const CACHE_PATH = path.resolve(syncCacheName);
 
 let CACHE = {
   version: 1,
-  local: {},  // key: "<TARGET>:<relPath>" -> { size, mtimeMs, hash }
+  local: {}, // key: "<TARGET>:<relPath>" -> { size, mtimeMs, hash }
   remote: {}, // key: "<TARGET>:<relPath>" -> { size, modifyTime, hash }
 };
 
@@ -245,7 +361,7 @@ function clearProgressLine() {
 
   // Zwei Progress-Zeilen ohne zusätzliche Newlines leeren:
   // Cursor steht nach updateProgress2() auf der ersten Zeile.
-  process.stdout.write("\r");      // an Zeilenanfang
+  process.stdout.write("\r"); // an Zeilenanfang
   process.stdout.write("\x1b[2K"); // erste Zeile löschen
   process.stdout.write("\x1b[1B"); // eine Zeile nach unten
   process.stdout.write("\x1b[2K"); // zweite Zeile löschen
@@ -256,27 +372,6 @@ function clearProgressLine() {
 
 function toPosix(p) {
   return p.split(path.sep).join("/");
-}
-
-function log(...msg) {
-  clearProgressLine();
-  console.log(...msg);
-}
-
-function vlog(...msg) {
-  if (!IS_VERBOSE) return;
-  clearProgressLine();
-  console.log(...msg);
-}
-
-function elog(...msg) {
-  clearProgressLine();
-  console.error(...msg);
-}
-
-function wlog(...msg) {
-  clearProgressLine();
-  console.warn(...msg);
 }
 
 function matchesAny(patterns, relPath) {
@@ -303,6 +398,11 @@ function isTextFile(relPath) {
   return TEXT_EXT.includes(ext);
 }
 
+function isMediaFile(relPath) {
+  const ext = path.extname(relPath).toLowerCase();
+  return MEDIA_EXT.includes(ext);
+}
+
 function shortenPathForProgress(rel) {
   if (!rel) return "";
   const parts = rel.split("/");
@@ -320,17 +420,28 @@ function shortenPathForProgress(rel) {
   return `…/${prev}/${last}`;
 }
 
-// Two-line progress bar
+// Two-line progress bar (for terminal) + 1-line log entry
 function updateProgress2(prefix, current, total, rel = "") {
+  const short = rel ? shortenPathForProgress(rel) : "";
+
+  //Log file: always as a single line with **full** rel path
+  const base =
+    total && total > 0
+      ? `${prefix}${current}/${total} Files`
+      : `${prefix}${current} Files`;
+  writeLogLine(
+    `[progress] ${base}${rel ? " – " + rel : ""}`
+  );
+
   if (!process.stdout.isTTY) {
-    // Fallback für Pipes / Logs
+    // Fallback-Terminal
     if (total && total > 0) {
       const percent = ((current / total) * 100).toFixed(1);
       console.log(
-        `${tab_a()}${prefix}${current}/${total} Files (${percent}%) – ${rel}`
+        `${tab_a()}${prefix}${current}/${total} Files (${percent}%) – ${short}`
       );
     } else {
-      console.log(`${tab_a()}${prefix}${current} Files – ${rel}`);
+      console.log(`${tab_a()}${prefix}${current} Files – ${short}`);
     }
     return;
   }
@@ -346,7 +457,6 @@ function updateProgress2(prefix, current, total, rel = "") {
     line1 = `${tab_a()}${prefix}${current} Files`;
   }
 
-  const short = rel ? shortenPathForProgress(rel) : "";
   let line2 = short;
 
   if (line1.length > width) line1 = line1.slice(0, width - 1);
@@ -383,8 +493,8 @@ async function runTasks(items, workerCount, handler, label = "Tasks") {
         elog(pc.red(`${tab_a()}⚠️ Error in ${label}:`), err.message || err);
       }
       done += 1;
-      if (done % 10 === 0 || done === total) {
-        updateProgress2(`${label}: `, done, total);
+      if (done === 1 || done % 10 === 0 || done === total) {
+        updateProgress2(`${label}: `, done, total, item.rel ?? "");
       }
     }
   }
@@ -423,12 +533,12 @@ async function walkLocal(root) {
           size: stat.size,
           mtimeMs: stat.mtimeMs,
           isText: isTextFile(rel),
+          isMedia: isMediaFile(rel),
         });
 
         scanned += 1;
         const chunk = IS_VERBOSE ? 1 : SCAN_CHUNK;
         if (scanned === 1 || scanned % chunk === 0) {
-          // totally unknown → total = 0 → no automatic \n
           updateProgress2("Scan local: ", scanned, 0, rel);
         }
       }
@@ -438,12 +548,35 @@ async function walkLocal(root) {
   await recurse(root);
 
   if (scanned > 0) {
-    // last line + neat finish
     updateProgress2("Scan local: ", scanned, 0, "fertig");
     process.stdout.write("\n");
     progressActive = false;
   }
 
+  return result;
+}
+
+// Plain walker für Bypass (ignoriert INCLUDE/EXCLUDE)
+async function walkLocalPlain(root) {
+  const result = new Map();
+
+  async function recurse(current) {
+    const entries = await fsp.readdir(current, { withFileTypes: true });
+    for (const entry of entries) {
+      const full = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        await recurse(full);
+      } else if (entry.isFile()) {
+        const rel = toPosix(path.relative(root, full));
+        result.set(rel, {
+          rel,
+          localPath: full,
+        });
+      }
+    }
+  }
+
+  await recurse(root);
   return result;
 }
 
@@ -494,6 +627,34 @@ async function walkRemote(sftp, remoteRoot) {
     progressActive = false;
   }
 
+  return result;
+}
+
+// Plain walker für Bypass (ignoriert INCLUDE/EXCLUDE)
+async function walkRemotePlain(sftp, remoteRoot) {
+  const result = new Map();
+
+  async function recurse(remoteDir, prefix) {
+    const items = await sftp.list(remoteDir);
+
+    for (const item of items) {
+      if (!item.name || item.name === "." || item.name === "..") continue;
+
+      const full = path.posix.join(remoteDir, item.name);
+      const rel = prefix ? `${prefix}/${item.name}` : item.name;
+
+      if (item.type === "d") {
+        await recurse(full, rel);
+      } else {
+        result.set(rel, {
+          rel,
+          remotePath: full,
+        });
+      }
+    }
+  }
+
+  await recurse(remoteRoot, "");
   return result;
 }
 
@@ -610,25 +771,139 @@ function describeSftpError(err) {
 }
 
 // ---------------------------------------------------------------------------
+// Bypass-only Mode (uploadList / downloadList ohne normalen Sync)
+// ---------------------------------------------------------------------------
+
+async function collectUploadTargets() {
+  const all = await walkLocalPlain(CONNECTION.localRoot);
+  const results = [];
+
+  for (const [rel, meta] of all.entries()) {
+    if (matchesAny(UPLOAD_LIST, rel)) {
+      const remotePath = path.posix.join(CONNECTION.remoteRoot, rel);
+      results.push({
+        rel,
+        localPath: meta.localPath,
+        remotePath,
+      });
+    }
+  }
+
+  return results;
+}
+
+async function collectDownloadTargets(sftp) {
+  const all = await walkRemotePlain(sftp, CONNECTION.remoteRoot);
+  const results = [];
+
+  for (const [rel, meta] of all.entries()) {
+    if (matchesAny(DOWNLOAD_LIST, rel)) {
+      const localPath = path.join(CONNECTION.localRoot, rel);
+      results.push({
+        rel,
+        remotePath: meta.remotePath,
+        localPath,
+      });
+    }
+  }
+
+  return results;
+}
+
+async function performBypassOnly(sftp) {
+  log("");
+  log(pc.bold(pc.cyan("🚀 Bypass-Only Mode (skip-sync)")));
+
+  if (RUN_UPLOAD_LIST) {
+    log("");
+    log(pc.bold(pc.cyan("⬆️  Upload-Bypass (uploadList) …")));
+    const targets = await collectUploadTargets();
+    log(`${tab_a()}→ ${targets.length} files from uploadList`);
+
+    if (!DRY_RUN) {
+      await runTasks(
+        targets,
+        CONNECTION.workers,
+        async ({ localPath, remotePath, rel }) => {
+          const remoteDir = path.posix.dirname(remotePath);
+          try {
+            await sftp.mkdir(remoteDir, true);
+          } catch {
+            // Directory may already exist
+          }
+          await sftp.put(localPath, remotePath);
+          vlog(`${tab_a()}${ADD} Uploaded (bypass): ${rel}`);
+        },
+        "Bypass Uploads"
+      );
+    } else {
+      for (const t of targets) {
+        log(`${tab_a()}${ADD} (DRY-RUN) Upload: ${t.rel}`);
+      }
+    }
+  }
+
+  if (RUN_DOWNLOAD_LIST) {
+    log("");
+    log(pc.bold(pc.cyan("⬇️  Download-Bypass (downloadList) …")));
+    const targets = await collectDownloadTargets(sftp);
+    log(`${tab_a()}→ ${targets.length} files from downloadList`);
+
+    if (!DRY_RUN) {
+      await runTasks(
+        targets,
+        CONNECTION.workers,
+        async ({ remotePath, localPath, rel }) => {
+          const localDir = path.dirname(localPath);
+          await fsp.mkdir(localDir, { recursive: true });
+          await sftp.get(remotePath, localPath);
+          vlog(`${tab_a()}${CHA} Downloaded (bypass): ${rel}`);
+        },
+        "Bypass Downloads"
+      );
+    } else {
+      for (const t of targets) {
+        log(`${tab_a()}${CHA} (DRY-RUN) Download: ${t.rel}`);
+      }
+    }
+  }
+
+  log("");
+  log(pc.bold(pc.green("✅ Bypass-only run finished.")));
+}
+
+// ---------------------------------------------------------------------------
 // MAIN
 // ---------------------------------------------------------------------------
+
+async function initLogFile() {
+  if (!LOG_FILE) return;
+  const dir = path.dirname(LOG_FILE);
+  await fsp.mkdir(dir, { recursive: true });
+  LOG_STREAM = fs.createWriteStream(LOG_FILE, {
+    flags: "w",
+    encoding: "utf8",
+  });
+}
 
 async function main() {
   const start = Date.now();
 
+  await initLogFile();
+
   // Header-Abstand wie gehabt: zwei Leerzeilen davor
-  log("\n\n" + hr2());
-  log(
-    pc.bold(
-      `🔐 SFTP Push-Synchronisation: sftp-push-sync  v${pkg.version}  [logLevel=${LOG_LEVEL}]`
-    )
-  );
+  log("\n" + hr2());
+  log(pc.bold(`🔐 SFTP Push-Synchronisation: sftp-push-sync  v${pkg.version}`));
+  log(`${tab_a()}LogLevel: ${LOG_LEVEL}`);
   log(`${tab_a()}Connection: ${pc.cyan(TARGET)}`);
   log(`${tab_a()}Worker: ${CONNECTION.workers}`);
-  log(`${tab_a()}Host: ${pc.green(CONNECTION.host)}:${pc.green(CONNECTION.port)}`);
+  log(
+    `${tab_a()}Host: ${pc.green(CONNECTION.host)}:${pc.green(CONNECTION.port)}`
+  );
   log(`${tab_a()}Local: ${pc.green(CONNECTION.localRoot)}`);
   log(`${tab_a()}Remote: ${pc.green(CONNECTION.remoteRoot)}`);
   if (DRY_RUN) log(pc.yellow(`${tab_a()}Mode: DRY-RUN (no changes)`));
+  if (SKIP_SYNC) log(pc.yellow(`${tab_a()}Mode: SKIP-SYNC (bypass only)`));
   if (RUN_UPLOAD_LIST || RUN_DOWNLOAD_LIST) {
     log(
       pc.blue(
@@ -637,6 +912,9 @@ async function main() {
         }`
       )
     );
+  }
+  if (LOG_FILE) {
+    log(`${tab_a()}LogFile: ${pc.cyan(LOG_FILE)}`);
   }
   log(hr1());
 
@@ -666,6 +944,22 @@ async function main() {
       );
       process.exit(1);
     }
+
+    // -------------------------------------------------------------
+    // SKIP-SYNC-Modus → nur Bypass mit Listen
+    // -------------------------------------------------------------
+    if (SKIP_SYNC) {
+      await performBypassOnly(sftp);
+      const duration = ((Date.now() - start) / 1000).toFixed(2);
+      log("");
+      log(pc.bold(pc.cyan("📊 Summary (bypass only):")));
+      log(`${tab_a()}Duration: ${pc.green(duration + " s")}`);
+      return;
+    }
+
+    // -------------------------------------------------------------
+    // Normaler Sync (inkl. evtl. paralleler Listen-Excludes)
+    // -------------------------------------------------------------
 
     // Phase 1 – mit exakt einer Leerzeile davor
     log("");
@@ -756,7 +1050,9 @@ async function main() {
 
         toUpdate.push({ rel, local: l, remote: r, remotePath });
         if (!IS_LACONIC) {
-          log(`${tab_a()}${CHA} ${pc.yellow("Content changed (Text):")} ${rel}`);
+          log(
+            `${tab_a()}${CHA} ${pc.yellow("Content changed (Text):")} ${rel}`
+          );
         }
       } else {
         // Binary: Hash comparison with cache
@@ -890,7 +1186,9 @@ async function main() {
     log(`${tab_a()}${DEL} Deleted: ${toDelete.length}`);
     if (AUTO_EXCLUDED.size > 0) {
       log(
-        `${tab_a()}${EXC} Excluded via uploadList | downloadList: ${AUTO_EXCLUDED.size}`
+        `${tab_a()}${EXC} Excluded via uploadList | downloadList: ${
+          AUTO_EXCLUDED.size
+        }`
       );
     }
     if (toAdd.length || toUpdate.length || toDelete.length) {
@@ -940,11 +1238,15 @@ async function main() {
         e.message || e
       );
     }
-  }
 
-  // Abschlusslinie + eine Leerzeile dahinter
-  log(hr2());
-  log("");
+    // Abschlusslinie + Leerzeile **vor** dem Schließen des Logfiles
+    log(hr2());
+    log("");
+
+    if (LOG_STREAM) {
+      LOG_STREAM.end();
+    }
+  }
 }
 
 main();

@@ -19,7 +19,7 @@ Features:
 - Hashes are cached in .sync-cache.json to save space.
 - Parallel uploads/deletions via worker pool
 - include/exclude patterns
-- special uploads / downloads
+- Sidecar uploads / downloads - Bypassing the sync process
 
 The file `sftp-push-sync.mjs` is pure JavaScript (ESM), not TypeScript. Node.js can execute it directly as long as "type": "module" is specified in package.json or the file has the extension .mjs.
 
@@ -124,7 +124,7 @@ If you have stored the scripts in `package.json` as follows:
 
 The dry run is a great way to compare files and fill the cache.
 
-### special uploads / downloads
+### Sidecar uploads / downloads
 
 A list of files that are excluded from the sync comparison and can be downloaded or uploaded separately.
 
@@ -145,6 +145,12 @@ sftp-push-sync staging --upload-list
 # just fetch the download list from the server (combined with normal synchronisation)
 sftp-push-sync prod --download-list --dry-run   # view first
 sftp-push-sync prod --download-list             # then do
+```
+
+Das `sidecar ` wird immer zusammen mit `sync` ausgeführt. Mit `--skip-sync` kann man den sync prozess aber aus ausklammern und nur das sidecar verarbeiten:
+
+```bash
+sftp-push-sync prod --download-list --skip-sync
 ```
 
 ### Logging Progress

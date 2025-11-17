@@ -124,7 +124,6 @@ If you have stored the scripts in `package.json` as follows:
 
 The dry run is a great way to compare files and fill the cache.
 
-
 ### special uploads / downloads
 
 A list of files that are excluded from the sync comparison and can be downloaded or uploaded separately.
@@ -163,18 +162,18 @@ For >100k files, use analyzeChunk = 10 or 50, otherwise the TTY output itself is
 
 Examples for Wirdcards for `include`, `exclude`, `uploadList` and `downloadList`:
 
-- `"content/**"` - ALLES unterhalb von `content/`
-- `".html", ".htm", ".md", ".txt", ".json"`- Nur bestimmte Dateiendungen
-- `"**/*.html"` - alle HTML-Dateien
-- `"**/*.md"`- alle Markdown-Dateien
-- `"content/**/*.md"` - nur Markdown in `content/`
+- `"content/**"` -EVERYTHING below `content/`
+- `".html", ".htm", ".md", ".txt", ".json"`- Only certain file extensions
+- `"**/*.html"` - all HTML files
+- `"**/*.md"`- all Markdown files
+- `"content/**/*.md"` - only Markdown in `content/`
 - `"static/images/**/*.jpg"`
-- `"**/thumb-*.*"` - thumb-Bilder überall
-- `"**/*-draft.*"` - Dateien mit -draft vor der Extension
-- `"content/**/*.md"` - alle Markdown-Dateien
-- `"config/**"` - komplette Konfiguration
-- `"static/images/covers/**"`- nur Cover-Bilder
-- `"logs/**/*.log"` - alle Logs aus logs/
+- `"**/thumb-*.*"` - thumb images everywhere
+- `"**/*-draft.*"` -Files with -draft before the extension
+- `"content/**/*.md"` - all Markdown files
+- `"config/**"` - complete configuration
+- `"static/images/covers/**"`- cover images only
+- `"logs/**/*.log"` - all logs from logs/
 - `"reports/**/*.xlsx"`
 
 practical excludes:

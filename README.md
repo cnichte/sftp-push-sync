@@ -147,7 +147,8 @@ sftp-push-sync prod --download-list --dry-run   # view first
 sftp-push-sync prod --download-list             # then do
 ```
 
-Das `sidecar ` wird immer zusammen mit `sync` ausgeführt. Mit `--skip-sync` kann man den sync prozess aber aus ausklammern und nur das sidecar verarbeiten:
+- The `sidecar` is always executed together with `sync` when you use the `--download-list` or `--upload-list` option.
+- However, with `--skip-sync`, you can exclude the sync process and only process the sidecar:
 
 ```bash
 sftp-push-sync prod --download-list --skip-sync

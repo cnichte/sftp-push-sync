@@ -23,6 +23,12 @@ Features:
 
 The file `sftp-push-sync.mjs` is pure JavaScript (ESM), not TypeScript. Node.js can execute it directly as long as "type": "module" is specified in package.json or the file has the extension .mjs.
 
+## Breaking changes in 2.0.0
+
+- The flags `--upload-list` / `--download-list` have been replaced by
+  `--sidecar-upload` / `--sidecar-download`.
+- The settings for sidecars are now located in the `sidecar` block of the connection.
+
 ## Install
 
 ```bash
@@ -47,20 +53,36 @@ Create a `sync.config.json` in the root folder of your project:
       "port": 23,
       "user": "ftpuser",
       "password": "mypassword",
-      "remoteRoot": "/folder/",
-      "localRoot": "public",
       "syncCache": ".sync-cache.prod.json",
-      "worker": 3
+      "worker": 3,
+      "sync": {
+        "localRoot": "public",
+        "remoteRoot": "/folder/"
+      },
+      "sidecar": {
+        "localRoot": "sidecar-local",
+        "remoteRoot": "/sidecar-remote/",
+        "uploadList": [],
+        "downloadList": []
+      }
     },
     "staging": {
       "host": "ftpserver02",
       "port": 22,
       "user": "ftp_user",
       "password": "total_secret",
-      "remoteRoot": "/web/my-page/",
-      "localRoot": "public",
       "syncCache": ".sync-cache.staging.json",
-      "worker": 1
+      "worker": 1,
+      "sync": {
+        "localRoot": "public",
+        "remoteRoot": "/web/my-page/"
+      },
+      "sidecar": {
+        "localRoot": "sidecar-local",
+        "remoteRoot": "/sidecar-remote/",
+        "uploadList": [],
+        "downloadList": []
+      }
     }
   },
   "include": [],
@@ -72,9 +94,7 @@ Create a `sync.config.json` in the root folder of your project:
     "analyzeChunk": 1
   },
   "logLevel": "normal",
-  "logFile": ".sftp-push-sync.{target}.log",
-  "uploadList": [],
-  "downloadList": ["download-counter.json"]
+  "logFile": ".sftp-push-sync.{target}.log"
 }
 ```
 
@@ -84,16 +104,18 @@ Create a `sync.config.json` in the root folder of your project:
 # Normal synchronisation
 node bin/sftp-push-sync.mjs staging
 
-# Consider normal synchronisation + upload list
-node bin/sftp-push-sync.mjs staging --upload-list
+# Normal synchronisation + sidecar upload list
+node bin/sftp-push-sync.mjs staging --sidecar-upload
 
-# Only lists, no standard synchronisation
-node bin/sftp-push-sync.mjs staging --skip-sync --upload-list
-node bin/sftp-push-sync.mjs staging --skip-sync --download-list
-node bin/sftp-push-sync.mjs staging --skip-sync --upload-list --download-list
+# Normal synchronisation + sidecar download list
+node bin/sftp-push-sync.mjs staging --sidecar-download
+
+# Only sidecar lists, no standard synchronisation
+node bin/sftp-push-sync.mjs staging --skip-sync --sidecar-upload
+node bin/sftp-push-sync.mjs staging --skip-sync --sidecar-download
 
 # (optional) only run lists dry
-node bin/sftp-push-sync.mjs staging --skip-sync --upload-list --dry-run
+node bin/sftp-push-sync.mjs staging --skip-sync --sidecar-upload --dry-run
 ```
 
 - Can be conveniently started via the scripts in `package.json`:
@@ -128,30 +150,28 @@ The dry run is a great way to compare files and fill the cache.
 
 A list of files that are excluded from the sync comparison and can be downloaded or uploaded separately.
 
-- `uploadList`
-  - Relative to localRoot "downloads.json"
-  - or with subfolders: "data/downloads.json"
-- `downloadList`
-  - Relative to remoteRoot "download-counter.json"
-  - or e.g. "logs/download-counter.json"
+- `sidecar.uploadList`
+  - Relative to sidecar.localRoot, e.g. "downloads.json" or "data/downloads.json"
+- `sidecar.downloadList`
+  - Relative to sidecar.remoteRoot, e.g. "download-counter.json" or "logs/download-counter.json"
 
 ```bash
 # normal synchronisation
 sftp-push-sync staging
 
-# Normal synchronisation + explicitly transfer upload list
-sftp-push-sync staging --upload-list
+# Normal synchronisation + explicitly transfer sidecar upload list
+sftp-push-sync staging --sidecar-upload
 
-# just fetch the download list from the server (combined with normal synchronisation)
-sftp-push-sync prod --download-list --dry-run   # view first
-sftp-push-sync prod --download-list             # then do
+# just fetch the sidecar download list from the server (combined with normal synchronisation)
+sftp-push-sync prod --sidecar-download --dry-run   # view first
+sftp-push-sync prod --sidecar-download             # then do
 ```
 
-- The `sidecar` is always executed together with `sync` when you use the `--download-list` or `--upload-list` option.
-- However, with `--skip-sync`, you can exclude the sync process and only process the sidecar:
+- The sidecar is always executed together with sync when using `--sidecar-download` or `--sidecar-upload`.
+- With `--skip-sync`, you can exclude the sync process and only process the sidecar:
 
 ```bash
-sftp-push-sync prod --download-list --skip-sync
+sftp-push-sync prod --sidecar-download --skip-sync
 ```
 
 ### Logging Progress

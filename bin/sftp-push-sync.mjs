@@ -63,8 +63,8 @@ const tab_b = () => " ".repeat(6);
 const args = process.argv.slice(2);
 const TARGET = args[0];
 const DRY_RUN = args.includes("--dry-run");
-const RUN_UPLOAD_LIST = args.includes("--upload-list");
-const RUN_DOWNLOAD_LIST = args.includes("--download-list");
+const RUN_UPLOAD_LIST = args.includes("--sidecar-upload");
+const RUN_DOWNLOAD_LIST = args.includes("--sidecar-download");
 const SKIP_SYNC = args.includes("--skip-sync");
 
 // logLevel override via CLI (optional)
@@ -81,7 +81,7 @@ if (!TARGET) {
 // Wenn jemand --skip-sync ohne Listen benutzt → sinnlos, also abbrechen
 if (SKIP_SYNC && !RUN_UPLOAD_LIST && !RUN_DOWNLOAD_LIST) {
   console.error(
-    pc.red("❌ --skip-sync requires at least --upload-list or --download-list.")
+    pc.red("❌ --skip-sync requires at least --sidecar-upload or --sidecar-download.")
   );
   process.exit(1);
 }
@@ -205,13 +205,31 @@ if (!TARGET_CONFIG) {
   process.exit(1);
 }
 
+const SYNC_CFG = TARGET_CONFIG.sync ?? TARGET_CONFIG;
+const SIDECAR_CFG = TARGET_CONFIG.sidecar ?? {};
+
+if (!SYNC_CFG.localRoot || !SYNC_CFG.remoteRoot) {
+  console.error(
+    pc.red(
+      `❌ Connection '${TARGET}' is missing sync.localRoot or sync.remoteRoot.`
+    )
+  );
+  process.exit(1);
+}
+
 const CONNECTION = {
   host: TARGET_CONFIG.host,
   port: TARGET_CONFIG.port ?? 22,
   user: TARGET_CONFIG.user,
   password: TARGET_CONFIG.password,
-  localRoot: path.resolve(TARGET_CONFIG.localRoot),
-  remoteRoot: TARGET_CONFIG.remoteRoot,
+  // Main sync roots
+  localRoot: path.resolve(SYNC_CFG.localRoot),
+  remoteRoot: SYNC_CFG.remoteRoot,
+  // Sidecar roots (for uploadList/downloadList)
+  sidecarLocalRoot: path.resolve(
+    SIDECAR_CFG.localRoot ?? SYNC_CFG.localRoot
+  ),
+  sidecarRemoteRoot: SIDECAR_CFG.remoteRoot ?? SYNC_CFG.remoteRoot,
   workers: TARGET_CONFIG.worker ?? 2,
 };
 
@@ -274,7 +292,7 @@ const MEDIA_EXT = CONFIG_RAW.mediaExtensions ?? [
   ".pdf",
 ];
 
-// Special: Lists for targeted uploads/downloads
+// Special: Lists for targeted uploads/downloads (per-connection sidecar)
 function normalizeList(list) {
   if (!Array.isArray(list)) return [];
   return list.flatMap((item) =>
@@ -287,8 +305,9 @@ function normalizeList(list) {
   );
 }
 
-const UPLOAD_LIST = normalizeList(CONFIG_RAW.uploadList ?? []);
-const DOWNLOAD_LIST = normalizeList(CONFIG_RAW.downloadList ?? []);
+// Lists from sidecar config (relative to sidecar.localRoot / sidecar.remoteRoot)
+const UPLOAD_LIST = normalizeList(SIDECAR_CFG.uploadList ?? []);
+const DOWNLOAD_LIST = normalizeList(SIDECAR_CFG.downloadList ?? []);
 
 // Effektive Exclude-Liste: explizites exclude + Upload/Download-Listen
 // → diese Dateien werden im „normalen“ Sync nicht angerührt,
@@ -775,12 +794,12 @@ function describeSftpError(err) {
 // ---------------------------------------------------------------------------
 
 async function collectUploadTargets() {
-  const all = await walkLocalPlain(CONNECTION.localRoot);
+  const all = await walkLocalPlain(CONNECTION.sidecarLocalRoot);
   const results = [];
 
   for (const [rel, meta] of all.entries()) {
     if (matchesAny(UPLOAD_LIST, rel)) {
-      const remotePath = path.posix.join(CONNECTION.remoteRoot, rel);
+      const remotePath = path.posix.join(CONNECTION.sidecarRemoteRoot, rel);
       results.push({
         rel,
         localPath: meta.localPath,
@@ -793,12 +812,12 @@ async function collectUploadTargets() {
 }
 
 async function collectDownloadTargets(sftp) {
-  const all = await walkRemotePlain(sftp, CONNECTION.remoteRoot);
+  const all = await walkRemotePlain(sftp, CONNECTION.sidecarRemoteRoot);
   const results = [];
 
   for (const [rel, meta] of all.entries()) {
     if (matchesAny(DOWNLOAD_LIST, rel)) {
-      const localPath = path.join(CONNECTION.localRoot, rel);
+      const localPath = path.join(CONNECTION.sidecarLocalRoot, rel);
       results.push({
         rel,
         remotePath: meta.remotePath,
@@ -813,6 +832,20 @@ async function collectDownloadTargets(sftp) {
 async function performBypassOnly(sftp) {
   log("");
   log(pc.bold(pc.cyan("🚀 Bypass-Only Mode (skip-sync)")));
+  log(
+    `${tab_a()}Sidecar Local: ${pc.green(CONNECTION.sidecarLocalRoot)}`
+  );
+  log(
+    `${tab_a()}Sidecar Remote: ${pc.green(CONNECTION.sidecarRemoteRoot)}`
+  );
+
+  if (RUN_UPLOAD_LIST && !fs.existsSync(CONNECTION.sidecarLocalRoot)) {
+    elog(
+      pc.red("❌ Sidecar local root does not exist:"),
+      CONNECTION.sidecarLocalRoot
+    );
+    process.exit(1);
+  }
 
   if (RUN_UPLOAD_LIST) {
     log("");
@@ -902,6 +935,14 @@ async function main() {
   );
   log(`${tab_a()}Local: ${pc.green(CONNECTION.localRoot)}`);
   log(`${tab_a()}Remote: ${pc.green(CONNECTION.remoteRoot)}`);
+  if (RUN_UPLOAD_LIST || RUN_DOWNLOAD_LIST || SKIP_SYNC) {
+    log(
+      `${tab_a()}Sidecar Local: ${pc.green(CONNECTION.sidecarLocalRoot)}`
+    );
+    log(
+      `${tab_a()}Sidecar Remote: ${pc.green(CONNECTION.sidecarRemoteRoot)}`
+    );
+  }
   if (DRY_RUN) log(pc.yellow(`${tab_a()}Mode: DRY-RUN (no changes)`));
   if (SKIP_SYNC) log(pc.yellow(`${tab_a()}Mode: SKIP-SYNC (bypass only)`));
   if (RUN_UPLOAD_LIST || RUN_DOWNLOAD_LIST) {
@@ -937,7 +978,7 @@ async function main() {
     connected = true;
     log(pc.green(`${tab_a()}✔ Connected to SFTP.`));
 
-    if (!fs.existsSync(CONNECTION.localRoot)) {
+    if (!SKIP_SYNC && !fs.existsSync(CONNECTION.localRoot)) {
       console.error(
         pc.red("❌ Local root does not exist:"),
         CONNECTION.localRoot

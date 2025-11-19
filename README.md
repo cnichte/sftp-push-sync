@@ -6,7 +6,10 @@ Implements a push syncronisation with Dry-Run. Performs the following tasks:
 2. Delete remote files that no longer exist locally
 3. Identify changes based on size or altered content and upload them
 
-I use the script to transfer [Hugo websites](https://gohugo.io) to the server.
+Why?
+
+- I use the script to transfer [Hugo websites](https://gohugo.io) to the server.
+- This is part of the [Hugo-Toolbox](https://www.npmjs.com/package/hugo-toolbox).
 
 Features:
 
@@ -16,7 +19,7 @@ Features:
 - adds, updates, deletes files
 - text diff detection
 - Binary files (images, video, audio, PDF, etc.): SHA-256 hash comparison
-- Hashes are cached in .sync-cache.json to save space.
+- Hashes are cached in .sync-cache.*.json
 - Parallel uploads/deletions via worker pool
 - include/exclude patterns
 - Sidecar uploads / downloads - Bypassing the sync process
@@ -250,3 +253,5 @@ Note: The first run always takes a while, especially with lots of media – so b
 
 - <https://www.npmjs.com/package/sftp-push-sync>
 - <https://github.com/cnichte/sftp-push-sync>
+- <https://www.npmjs.com/package/hugo-toolbox>
+- <https://carsten-nichte.de>

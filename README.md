@@ -247,7 +247,7 @@ Note: The first run always takes a while, especially with lots of media – so b
 
 ## Example Output
 
-![An console output example](images/example-output-001.png)
+![An console output example](images/example-output-002.jpg)
 
 ## Links
 

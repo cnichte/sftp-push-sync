@@ -385,6 +385,10 @@ async function markCacheDirty() {
 
 let progressActive = false;
 
+// Spinner-Frames für Progress-Zeilen
+const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+let spinnerIndex = 0;
+
 function clearProgressLine() {
   if (!process.stdout.isTTY || !progressActive) return;
 
@@ -450,25 +454,28 @@ function shortenPathForProgress(rel) {
 }
 
 // Two-line progress bar (for terminal) + 1-line log entry
-function updateProgress2(prefix, current, total, rel = "") {
+function updateProgress2(prefix, current, total, rel = "", suffix="Files") {
   const short = rel ? shortenPathForProgress(rel) : "";
 
   // Log file: always as a single line with **full** rel path
   const base =
     total && total > 0
-      ? `${prefix}${current}/${total} Files`
-      : `${prefix}${current} Files`;
+      ? `${prefix}${current}/${total} ${suffix}`
+      : `${prefix}${current} ${suffix}`;
   writeLogLine(`[progress] ${base}${rel ? " – " + rel : ""}`);
+
+  const frame = SPINNER_FRAMES[spinnerIndex];
+  spinnerIndex = (spinnerIndex + 1) % SPINNER_FRAMES.length;
 
   if (!process.stdout.isTTY) {
     // Fallback-Terminal
     if (total && total > 0) {
       const percent = ((current / total) * 100).toFixed(1);
       console.log(
-        `${tab_a()}${prefix}${current}/${total} Files (${percent}%) – ${short}`
+        `${tab_a()}${frame} ${prefix}${current}/${total} ${suffix} (${percent}%) – ${short}`
       );
     } else {
-      console.log(`${tab_a()}${prefix}${current} Files – ${short}`);
+      console.log(`${tab_a()}${frame} ${prefix}${current} ${suffix} – ${short}`);
     }
     return;
   }
@@ -478,10 +485,10 @@ function updateProgress2(prefix, current, total, rel = "") {
   let line1;
   if (total && total > 0) {
     const percent = ((current / total) * 100).toFixed(1);
-    line1 = `${tab_a()}${prefix}${current}/${total} Files (${percent}%)`;
+    line1 = `${tab_a()}${frame} ${prefix}${current}/${total} Files (${percent}%)`;
   } else {
     // „unknown total“ / Scanner-Modus
-    line1 = `${tab_a()}${prefix}${current} Files`;
+    line1 = `${tab_a()}${frame} ${prefix}${current} Files`;
   }
 
   let line2 = short;
@@ -535,6 +542,17 @@ async function runTasks(items, workerCount, handler, label = "Tasks") {
 }
 
 // ---------------------------------------------------------------------------
+// Directory-Statistiken (für Summary)
+// ---------------------------------------------------------------------------
+
+const DIR_STATS = {
+  ensuredDirs: 0, // Verzeichnisse, die wir während "Preparing remote directories" geprüft haben
+  createdDirs: 0, // Verzeichnisse, die wirklich neu angelegt wurden
+  cleanupVisited: 0, // Verzeichnisse, die während Cleanup inspiziert wurden
+  cleanupDeleted: 0, // Verzeichnisse, die gelöscht wurden
+};
+
+// ---------------------------------------------------------------------------
 // Neue Helper: Verzeichnisse für Uploads/Updates vorbereiten
 // ---------------------------------------------------------------------------
 
@@ -563,16 +581,42 @@ function collectDirsFromChanges(changes) {
 
 async function ensureAllRemoteDirsExist(sftp, remoteRoot, toAdd, toUpdate) {
   const dirs = collectDirsFromChanges([...toAdd, ...toUpdate]);
+  const total = dirs.length;
+  DIR_STATS.ensuredDirs += total;
+
+  if (total === 0) return;
+
+  let current = 0;
 
   for (const relDir of dirs) {
+    current += 1;
     const remoteDir = path.posix.join(remoteRoot, relDir);
+
+    // Fortschritt: in der zweiten Zeile den Pfad anzeigen
+    updateProgress2("Prepare dirs: ", current, total, relDir);
+
     try {
-      await sftp.mkdir(remoteDir, true);
-      vlog(`${tab_a()}${pc.dim("dir ok:")} ${remoteDir}`);
-    } catch {
-      // Directory may already exist / keine Rechte – ignorieren
+      const exists = await sftp.exists(remoteDir);
+      if (!exists) {
+        await sftp.mkdir(remoteDir, true);
+        DIR_STATS.createdDirs += 1;
+        vlog(`${tab_a()}${pc.dim("dir created:")} ${remoteDir}`);
+      } else {
+        vlog(`${tab_a()}${pc.dim("dir ok:")} ${remoteDir}`);
+      }
+    } catch (e) {
+      wlog(
+        pc.yellow("⚠️  Could not ensure directory:"),
+        remoteDir,
+        e.message || e
+      );
     }
   }
+
+  // Zeile „fertig“ markieren und Progress-Flag zurücksetzen
+  updateProgress2("Prepare dirs: ", total, total, "fertig");
+  process.stdout.write("\n");
+  progressActive = false;
 }
 
 // -----------------------------------------------------------
@@ -583,6 +627,20 @@ async function cleanupEmptyDirs(sftp, rootDir) {
   // Rekursiv prüfen, ob ein Verzeichnis und seine Unterverzeichnisse
   // KEINE Dateien enthalten. Nur dann löschen wir es.
   async function recurse(dir, depth = 0) {
+    DIR_STATS.cleanupVisited += 1;
+
+    const relForProgress =
+      toPosix(path.relative(rootDir, dir)) || ".";
+
+    // Fortschritt: aktuelle Directory in zweiter Zeile anzeigen
+    updateProgress2(
+      "Cleanup dirs: ",
+      DIR_STATS.cleanupVisited,
+      0,
+      relForProgress, 
+      "Folders"
+    );
+
     let hasFile = false;
     const subdirs = [];
 
@@ -626,14 +684,16 @@ async function cleanupEmptyDirs(sftp, rootDir) {
 
     // Root nur löschen, wenn explizit erlaubt
     if (isEmpty && (!isRoot || CLEANUP_EMPTY_ROOTS)) {
-      const rel = toPosix(path.relative(rootDir, dir)) || ".";
+      const rel = relForProgress || ".";
       if (DRY_RUN) {
         log(`${tab_a()}${DEL} (DRY-RUN) Remove empty directory: ${rel}`);
+        DIR_STATS.cleanupDeleted += 1;
       } else {
         try {
           // Nicht rekursiv: wir löschen nur, wenn unser eigener Check "leer" sagt.
           await sftp.rmdir(dir, false);
           log(`${tab_a()}${DEL} Removed empty directory: ${rel}`);
+          DIR_STATS.cleanupDeleted += 1;
         } catch (e) {
           wlog(
             pc.yellow("⚠️  Could not remove directory:"),
@@ -650,6 +710,17 @@ async function cleanupEmptyDirs(sftp, rootDir) {
   }
 
   await recurse(rootDir, 0);
+
+  if (DIR_STATS.cleanupVisited > 0) {
+    updateProgress2(
+      "Cleanup dirs: ",
+      DIR_STATS.cleanupVisited,
+      DIR_STATS.cleanupVisited,
+      "fertig", "Folders"
+    );
+    process.stdout.write("\n");
+    progressActive = false;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1172,7 +1243,7 @@ async function main() {
       if (!r) {
         toAdd.push({ rel, local: l, remotePath });
         if (!IS_LACONIC) {
-          log(`${ADD} ${pc.green("New:")} ${rel}`);
+          log(`${tab_a()}${ADD} ${pc.green("New:")} ${rel}`);
         }
         continue;
       }
@@ -1181,7 +1252,7 @@ async function main() {
       if (l.size !== r.size) {
         toUpdate.push({ rel, local: l, remote: r, remotePath });
         if (!IS_LACONIC) {
-          log(`${CHA} ${pc.yellow("Size changed:")} ${rel}`);
+          log(`${tab_a()}${CHA} ${pc.yellow("Size changed:")} ${rel}`);
         }
         continue;
       }
@@ -1239,7 +1310,7 @@ async function main() {
 
         toUpdate.push({ rel, local: l, remote: r, remotePath });
         if (!IS_LACONIC) {
-          log(`${CHA} ${pc.yellow("Content changed (Binary):")} ${rel}`);
+          log(`${tab_a()}${CHA} ${pc.yellow("Content changed (Binary):")} ${rel}`);
         }
       }
     }
@@ -1375,6 +1446,15 @@ async function main() {
         }`
       );
     }
+
+    // Directory-Statistik
+    const dirsChecked = DIR_STATS.ensuredDirs + DIR_STATS.cleanupVisited;
+    log("");
+    log(pc.bold("Folders:"));
+    log(`${tab_a()}Checked : ${dirsChecked}`);
+    log(`${tab_a()}${ADD} Created: ${DIR_STATS.createdDirs}`);
+    log(`${tab_a()}${DEL} Deleted: ${DIR_STATS.cleanupDeleted}`);
+
     if (toAdd.length || toUpdate.length || toDelete.length) {
       log("");
       log("📄 Changes:");

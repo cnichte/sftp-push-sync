@@ -8,6 +8,7 @@
  * 1. Upload new files
  * 2. Delete remote files that no longer exist locally
  * 3. Detect changes based on size or modified content and upload them
+ * 4. Supports separate sidecar upload/download lists for special files
  *
  * Features:
  *  - multiple connections in sync.config.json
@@ -25,6 +26,11 @@
  * - For example, log files or other special files.
  * - These files can be downloaded or uploaded separately.
  *
+ * Folder handling:
+ *  Delete Folders if
+ *  - If, for example, a directory is empty because all files have been deleted from it.
+ *  - Or if a directory no longer exists locally.
+ * 
  * The file sftp-push-sync.mjs is pure JavaScript (ESM), not TypeScript.
  * Node.js can execute it directly as long as "type": "module" is specified in package.json
  * or the file has the extension .mjs.
@@ -81,7 +87,9 @@ if (!TARGET) {
 // Wenn jemand --skip-sync ohne Listen benutzt → sinnlos, also abbrechen
 if (SKIP_SYNC && !RUN_UPLOAD_LIST && !RUN_DOWNLOAD_LIST) {
   console.error(
-    pc.red("❌ --skip-sync requires at least --sidecar-upload or --sidecar-download.")
+    pc.red(
+      "❌ --skip-sync requires at least --sidecar-upload or --sidecar-download."
+    )
   );
   process.exit(1);
 }
@@ -113,12 +121,11 @@ if (!CONFIG_RAW.connections || typeof CONFIG_RAW.connections !== "object") {
 // ---------------------------------------------------------------------------
 // Logging helpers (Terminal + optional Logfile)
 // ---------------------------------------------------------------------------
+
 // Default: .sync.{TARGET}.log, kann via config.logFile überschrieben werden
 const DEFAULT_LOG_FILE = `.sync.${TARGET}.log`;
 const rawLogFilePattern = CONFIG_RAW.logFile || DEFAULT_LOG_FILE;
-const LOG_FILE = path.resolve(
-  rawLogFilePattern.replace("{target}", TARGET)
-);
+const LOG_FILE = path.resolve(rawLogFilePattern.replace("{target}", TARGET));
 let LOG_STREAM = null;
 
 /** einmalig Logfile-Stream öffnen */
@@ -175,7 +182,7 @@ function rawConsoleWarn(...msg) {
   writeLogLine("[WARN] " + line);
 }
 
-// High-level Helfer, die du überall im Script schon verwendest:
+// High-level Helfer
 function log(...msg) {
   rawConsoleLog(...msg);
 }
@@ -205,6 +212,7 @@ if (!TARGET_CONFIG) {
   process.exit(1);
 }
 
+// Haupt-Sync-Config + Sidecar
 const SYNC_CFG = TARGET_CONFIG.sync ?? TARGET_CONFIG;
 const SIDECAR_CFG = TARGET_CONFIG.sidecar ?? {};
 
@@ -225,10 +233,8 @@ const CONNECTION = {
   // Main sync roots
   localRoot: path.resolve(SYNC_CFG.localRoot),
   remoteRoot: SYNC_CFG.remoteRoot,
-  // Sidecar roots (for uploadList/downloadList)
-  sidecarLocalRoot: path.resolve(
-    SIDECAR_CFG.localRoot ?? SYNC_CFG.localRoot
-  ),
+  // Sidecar roots (für sidecar-upload / sidecar-download)
+  sidecarLocalRoot: path.resolve(SIDECAR_CFG.localRoot ?? SYNC_CFG.localRoot),
   sidecarRemoteRoot: SIDECAR_CFG.remoteRoot ?? SYNC_CFG.remoteRoot,
   workers: TARGET_CONFIG.worker ?? 2,
 };
@@ -252,6 +258,10 @@ const PROGRESS = CONFIG_RAW.progress ?? {};
 const SCAN_CHUNK = PROGRESS.scanChunk ?? (IS_VERBOSE ? 1 : 100);
 const ANALYZE_CHUNK = PROGRESS.analyzeChunk ?? (IS_VERBOSE ? 1 : 10);
 // For >100k files, rather 10–50, for debugging/troubleshooting 1.
+
+// Leere Verzeichnisse nach dem Sync entfernen?
+const CLEANUP_EMPTY_DIRS = CONFIG_RAW.cleanupEmptyDirs ?? true;
+const CLEANUP_EMPTY_ROOTS = CONFIG_RAW.cleanupEmptyRoots ?? false;
 
 // ---------------------------------------------------------------------------
 // Shared config from JSON
@@ -311,10 +321,10 @@ const DOWNLOAD_LIST = normalizeList(SIDECAR_CFG.downloadList ?? []);
 
 // Effektive Exclude-Liste: explizites exclude + Upload/Download-Listen
 // → diese Dateien werden im „normalen“ Sync nicht angerührt,
-//   sondern nur über die Bypass-Mechanik behandelt.
+//   sondern nur über die Sidecar-Mechanik behandelt.
 const EXCLUDE = [...BASE_EXCLUDE, ...UPLOAD_LIST, ...DOWNLOAD_LIST];
 
-// List of ALL files that were excluded due to uploadList/downloadList
+// List of ALL files that were ausgeschlossen durch uploadList/downloadList
 const AUTO_EXCLUDED = new Set();
 
 // Cache file name per connection
@@ -403,7 +413,7 @@ function isIncluded(relPath) {
   if (INCLUDE.length > 0 && !matchesAny(INCLUDE, relPath)) return false;
   // Exclude-Regeln
   if (EXCLUDE.length > 0 && matchesAny(EXCLUDE, relPath)) {
-    // Falls durch Upload/Download-Liste → merken
+    // Falls durch Sidecar-Listen → merken
     if (UPLOAD_LIST.includes(relPath) || DOWNLOAD_LIST.includes(relPath)) {
       AUTO_EXCLUDED.add(relPath);
     }
@@ -443,14 +453,12 @@ function shortenPathForProgress(rel) {
 function updateProgress2(prefix, current, total, rel = "") {
   const short = rel ? shortenPathForProgress(rel) : "";
 
-  //Log file: always as a single line with **full** rel path
+  // Log file: always as a single line with **full** rel path
   const base =
     total && total > 0
       ? `${prefix}${current}/${total} Files`
       : `${prefix}${current} Files`;
-  writeLogLine(
-    `[progress] ${base}${rel ? " – " + rel : ""}`
-  );
+  writeLogLine(`[progress] ${base}${rel ? " – " + rel : ""}`);
 
   if (!process.stdout.isTTY) {
     // Fallback-Terminal
@@ -524,6 +532,124 @@ async function runTasks(items, workerCount, handler, label = "Tasks") {
     workers.push(worker());
   }
   await Promise.all(workers);
+}
+
+// ---------------------------------------------------------------------------
+// Neue Helper: Verzeichnisse für Uploads/Updates vorbereiten
+// ---------------------------------------------------------------------------
+
+function collectDirsFromChanges(changes) {
+  const dirs = new Set();
+
+  for (const item of changes) {
+    const rel = item.rel;
+    if (!rel) continue;
+
+    const parts = rel.split("/");
+    if (parts.length <= 1) continue; // Dateien im Root
+
+    let acc = "";
+    for (let i = 0; i < parts.length - 1; i += 1) {
+      acc = acc ? `${acc}/${parts[i]}` : parts[i];
+      dirs.add(acc);
+    }
+  }
+
+  // flachere Pfade zuerst, damit Eltern vor Kindern angelegt werden
+  return [...dirs].sort(
+    (a, b) => a.split("/").length - b.split("/").length
+  );
+}
+
+async function ensureAllRemoteDirsExist(sftp, remoteRoot, toAdd, toUpdate) {
+  const dirs = collectDirsFromChanges([...toAdd, ...toUpdate]);
+
+  for (const relDir of dirs) {
+    const remoteDir = path.posix.join(remoteRoot, relDir);
+    try {
+      await sftp.mkdir(remoteDir, true);
+      vlog(`${tab_a()}${pc.dim("dir ok:")} ${remoteDir}`);
+    } catch {
+      // Directory may already exist / keine Rechte – ignorieren
+    }
+  }
+}
+
+// -----------------------------------------------------------
+// Cleanup: remove *only truly empty* directories on remote
+// -----------------------------------------------------------
+
+async function cleanupEmptyDirs(sftp, rootDir) {
+  // Rekursiv prüfen, ob ein Verzeichnis und seine Unterverzeichnisse
+  // KEINE Dateien enthalten. Nur dann löschen wir es.
+  async function recurse(dir, depth = 0) {
+    let hasFile = false;
+    const subdirs = [];
+
+    let items;
+    try {
+      items = await sftp.list(dir);
+    } catch (e) {
+      // Falls das Verzeichnis inzwischen weg ist o.ä., brechen wir hier ab.
+      wlog(
+        pc.yellow("⚠️  Could not list directory during cleanup:"),
+        dir,
+        e.message || e
+      );
+      return false;
+    }
+
+    for (const item of items) {
+      if (!item.name || item.name === "." || item.name === "..") continue;
+
+      if (item.type === "d") {
+        subdirs.push(item);
+      } else {
+        // Jede Datei (egal ob sie nach INCLUDE/EXCLUDE
+        // sonst ignoriert würde) verhindert das Löschen.
+        hasFile = true;
+      }
+    }
+
+    // Erst alle Unterverzeichnisse aufräumen (post-order)
+    let allSubdirsEmpty = true;
+    for (const sub of subdirs) {
+      const full = path.posix.join(dir, sub.name);
+      const subEmpty = await recurse(full, depth + 1);
+      if (!subEmpty) {
+        allSubdirsEmpty = false;
+      }
+    }
+
+    const isRoot = dir === rootDir;
+    const isEmpty = !hasFile && allSubdirsEmpty;
+
+    // Root nur löschen, wenn explizit erlaubt
+    if (isEmpty && (!isRoot || CLEANUP_EMPTY_ROOTS)) {
+      const rel = toPosix(path.relative(rootDir, dir)) || ".";
+      if (DRY_RUN) {
+        log(`${tab_a()}${DEL} (DRY-RUN) Remove empty directory: ${rel}`);
+      } else {
+        try {
+          // Nicht rekursiv: wir löschen nur, wenn unser eigener Check "leer" sagt.
+          await sftp.rmdir(dir, false);
+          log(`${tab_a()}${DEL} Removed empty directory: ${rel}`);
+        } catch (e) {
+          wlog(
+            pc.yellow("⚠️  Could not remove directory:"),
+            dir,
+            e.message || e
+          );
+          // Falls rmdir scheitert, betrachten wir das Verzeichnis als "nicht leer"
+          return false;
+        }
+      }
+    }
+
+    return isEmpty;
+  }
+
+  await recurse(rootDir, 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -616,7 +742,7 @@ async function walkRemote(sftp, remoteRoot) {
       const full = path.posix.join(remoteDir, item.name);
       const rel = prefix ? `${prefix}/${item.name}` : item.name;
 
-      // Apply include/exclude rules also on remote side
+      // Include/Exclude-Regeln auch auf Remote anwenden
       if (!isIncluded(rel)) continue;
 
       if (item.type === "d") {
@@ -790,7 +916,7 @@ function describeSftpError(err) {
 }
 
 // ---------------------------------------------------------------------------
-// Bypass-only Mode (uploadList / downloadList ohne normalen Sync)
+// Bypass-only Mode (sidecar-upload / sidecar-download ohne normalen Sync)
 // ---------------------------------------------------------------------------
 
 async function collectUploadTargets() {
@@ -832,12 +958,8 @@ async function collectDownloadTargets(sftp) {
 async function performBypassOnly(sftp) {
   log("");
   log(pc.bold(pc.cyan("🚀 Bypass-Only Mode (skip-sync)")));
-  log(
-    `${tab_a()}Sidecar Local: ${pc.green(CONNECTION.sidecarLocalRoot)}`
-  );
-  log(
-    `${tab_a()}Sidecar Remote: ${pc.green(CONNECTION.sidecarRemoteRoot)}`
-  );
+  log(`${tab_a()}Sidecar Local: ${pc.green(CONNECTION.sidecarLocalRoot)}`);
+  log(`${tab_a()}Sidecar Remote: ${pc.green(CONNECTION.sidecarRemoteRoot)}`);
 
   if (RUN_UPLOAD_LIST && !fs.existsSync(CONNECTION.sidecarLocalRoot)) {
     elog(
@@ -849,7 +971,7 @@ async function performBypassOnly(sftp) {
 
   if (RUN_UPLOAD_LIST) {
     log("");
-    log(pc.bold(pc.cyan("⬆️  Upload-Bypass (uploadList) …")));
+    log(pc.bold(pc.cyan("⬆️  Upload-Bypass (sidecar-upload) …")));
     const targets = await collectUploadTargets();
     log(`${tab_a()}→ ${targets.length} files from uploadList`);
 
@@ -878,7 +1000,7 @@ async function performBypassOnly(sftp) {
 
   if (RUN_DOWNLOAD_LIST) {
     log("");
-    log(pc.bold(pc.cyan("⬇️  Download-Bypass (downloadList) …")));
+    log(pc.bold(pc.cyan("⬇️  Download-Bypass (sidecar-download) …")));
     const targets = await collectDownloadTargets(sftp);
     log(`${tab_a()}→ ${targets.length} files from downloadList`);
 
@@ -936,23 +1058,22 @@ async function main() {
   log(`${tab_a()}Local: ${pc.green(CONNECTION.localRoot)}`);
   log(`${tab_a()}Remote: ${pc.green(CONNECTION.remoteRoot)}`);
   if (RUN_UPLOAD_LIST || RUN_DOWNLOAD_LIST || SKIP_SYNC) {
-    log(
-      `${tab_a()}Sidecar Local: ${pc.green(CONNECTION.sidecarLocalRoot)}`
-    );
-    log(
-      `${tab_a()}Sidecar Remote: ${pc.green(CONNECTION.sidecarRemoteRoot)}`
-    );
+    log(`${tab_a()}Sidecar Local: ${pc.green(CONNECTION.sidecarLocalRoot)}`);
+    log(`${tab_a()}Sidecar Remote: ${pc.green(CONNECTION.sidecarRemoteRoot)}`);
   }
   if (DRY_RUN) log(pc.yellow(`${tab_a()}Mode: DRY-RUN (no changes)`));
   if (SKIP_SYNC) log(pc.yellow(`${tab_a()}Mode: SKIP-SYNC (bypass only)`));
   if (RUN_UPLOAD_LIST || RUN_DOWNLOAD_LIST) {
     log(
       pc.blue(
-        `${tab_a()}Extra: ${RUN_UPLOAD_LIST ? "uploadList " : ""}${
-          RUN_DOWNLOAD_LIST ? "downloadList" : ""
-        }`
+        `${tab_a()}Extra: ${
+          RUN_UPLOAD_LIST ? "sidecar-upload " : ""
+        }${RUN_DOWNLOAD_LIST ? "sidecar-download" : ""}`
       )
     );
+  }
+  if (CLEANUP_EMPTY_DIRS) {
+    log(`${tab_a()}Cleanup empty dirs: ${pc.green("enabled")}`);
   }
   if (LOG_FILE) {
     log(`${tab_a()}LogFile: ${pc.cyan(LOG_FILE)}`);
@@ -987,7 +1108,7 @@ async function main() {
     }
 
     // -------------------------------------------------------------
-    // SKIP-SYNC-Modus → nur Bypass mit Listen
+    // SKIP-SYNC-Modus → nur Sidecar-Listen
     // -------------------------------------------------------------
     if (SKIP_SYNC) {
       await performBypassOnly(sftp);
@@ -999,7 +1120,7 @@ async function main() {
     }
 
     // -------------------------------------------------------------
-    // Normaler Sync (inkl. evtl. paralleler Listen-Excludes)
+    // Normaler Sync (inkl. evtl. paralleler Sidecar-Excludes)
     // -------------------------------------------------------------
 
     // Phase 1 – mit exakt einer Leerzeile davor
@@ -1010,7 +1131,7 @@ async function main() {
 
     if (AUTO_EXCLUDED.size > 0) {
       log("");
-      log(pc.dim("   Auto-excluded (uploadList/downloadList):"));
+      log(pc.dim("   Auto-excluded (sidecar upload/download):"));
       [...AUTO_EXCLUDED].sort().forEach((file) => {
         log(pc.dim(`${tab_a()} - ${file}`));
       });
@@ -1147,6 +1268,20 @@ async function main() {
     }
 
     // -------------------------------------------------------------------
+    // Verzeichnisse vorab anlegen (damit Worker sich nicht ins Gehege kommen)
+    // -------------------------------------------------------------------
+    if (!DRY_RUN && (toAdd.length || toUpdate.length)) {
+      log("");
+      log(pc.bold(pc.cyan("📁 Preparing remote directories …")));
+      await ensureAllRemoteDirsExist(
+        sftp,
+        CONNECTION.remoteRoot,
+        toAdd,
+        toUpdate
+      );
+    }
+
+    // -------------------------------------------------------------------
     // Phase 5: Execute changes (parallel, worker-based)
     // -------------------------------------------------------------------
 
@@ -1159,6 +1294,7 @@ async function main() {
         toAdd,
         CONNECTION.workers,
         async ({ local: l, remotePath }) => {
+          // Verzeichnisse sollten bereits existieren – mkdir hier nur als Fallback
           const remoteDir = path.posix.dirname(remotePath);
           try {
             await sftp.mkdir(remoteDir, true);
@@ -1212,6 +1348,13 @@ async function main() {
       );
     }
 
+    // Optional: leere Verzeichnisse aufräumen
+    if (!DRY_RUN && CLEANUP_EMPTY_DIRS) {
+      log("");
+      log(pc.bold(pc.cyan("🧹 Cleaning up empty remote directories …")));
+      await cleanupEmptyDirs(sftp, CONNECTION.remoteRoot);
+    }
+
     const duration = ((Date.now() - start) / 1000).toFixed(2);
 
     // Write cache safely at the end
@@ -1227,7 +1370,7 @@ async function main() {
     log(`${tab_a()}${DEL} Deleted: ${toDelete.length}`);
     if (AUTO_EXCLUDED.size > 0) {
       log(
-        `${tab_a()}${EXC} Excluded via uploadList | downloadList: ${
+        `${tab_a()}${EXC} Excluded via sidecar upload/download: ${
           AUTO_EXCLUDED.size
         }`
       );

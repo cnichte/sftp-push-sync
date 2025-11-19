@@ -55,6 +55,7 @@ Create a `sync.config.json` in the root folder of your project:
       "password": "mypassword",
       "syncCache": ".sync-cache.prod.json",
       "worker": 3,
+      "cleanupEmptyDirs": true,
       "sync": {
         "localRoot": "public",
         "remoteRoot": "/folder/"
@@ -85,6 +86,7 @@ Create a `sync.config.json` in the root folder of your project:
       }
     }
   },
+  "cleanupEmptyDirs": true,
   "include": [],
   "exclude": ["**/.DS_Store", "**/.git/**", "**/node_modules/**"],
   "textExtensions": [".html",".xml",".txt",".json",".js",".css",".md",".svg"],
@@ -162,7 +164,8 @@ sftp-push-sync staging
 # Normal synchronisation + explicitly transfer sidecar upload list
 sftp-push-sync staging --sidecar-upload
 
-# just fetch the sidecar download list from the server (combined with normal synchronisation)
+# just fetch the sidecar download list from the server
+# combined with normal synchronisation
 sftp-push-sync prod --sidecar-download --dry-run   # view first
 sftp-push-sync prod --sidecar-download             # then do
 ```
@@ -218,6 +221,14 @@ practical excludes:
 ]
 ```
 
+### Folder handling
+
+Sync only handles files and creates missing directories during upload.
+However, it should also manage directories:
+
+- If, for example, a directory is empty because all files have been deleted from it.
+- Or if a directory no longer exists locally.
+
 ## Which files are needed?
 
 - `sync.config.json` - The configuration file (with passwords in plain text, so please leave it out of the git repository)
@@ -227,9 +238,9 @@ practical excludes:
 - The cache files: `.sync-cache.*.json`
 - The log file: `.sftp-push-sync.{target}.log` (Optional, overwritten with each run)
 
-You can safely delete the local cache at any time. The first analysis will then take longer again, because remote hashes will be streamed again. After that, everything will run fast.
+You can safely delete the local cache at any time. The first analysis will then take longer, because remote hashes will be streamed again. After that, everything will run fast.
 
-Note: The first run always takes a while, especially with lots of images – so be patient! Once the cache is full, it will be faster.
+Note: The first run always takes a while, especially with lots of media – so be patient! Once the cache is full, it will be faster.
 
 ## Example Output
 

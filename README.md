@@ -55,7 +55,6 @@ Create a `sync.config.json` in the root folder of your project:
       "password": "mypassword",
       "syncCache": ".sync-cache.prod.json",
       "worker": 3,
-      "cleanupEmptyDirs": true,
       "sync": {
         "localRoot": "public",
         "remoteRoot": "/folder/"
@@ -226,8 +225,9 @@ practical excludes:
 Sync only handles files and creates missing directories during upload.
 However, it should also manage directories:
 
-- If, for example, a directory is empty because all files have been deleted from it.
-- Or if a directory no longer exists locally.
+- They should (optionally) be removed if:
+  - for example, a directory is empty because all files have been deleted from it.
+  - or if a directory no longer exists locally.
 
 ## Which files are needed?
 

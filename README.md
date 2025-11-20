@@ -88,10 +88,11 @@ Create a `sync.config.json` in the root folder of your project:
       }
     }
   },
+  "parallelScan": true,
   "cleanupEmptyDirs": true,
   "include": [],
   "exclude": ["**/.DS_Store", "**/.git/**", "**/node_modules/**"],
-  "textExtensions": [".html",".xml",".txt",".json",".js",".css",".md",".svg"],
+  "textExtensions": [".shtml",".xml",".txt",".json",".js",".css",".md",".svg"],
   "mediaExtensions": [".jpg",".jpeg",".png",".webp",".gif",".avif",".tif",".tiff",".mp4",".mov",".m4v","mp3",".wav",".flac"],
   "progress": {
     "scanChunk": 10,
@@ -149,6 +150,18 @@ If you have stored the scripts in `package.json` as follows:
 ```
 
 The dry run is a great way to compare files and fill the cache.
+
+### How ist works
+
+Es werden 5 SChritten abgearbeitet:
+
+- Phase 1: Scan local files
+- Phase 2: Scan remote files
+- Phase 3: Compare & decide
+- Phase 4: Removing orphaned remote files
+- Preparing remote directories
+- Phase 5: Apply changes
+- Cleaning up empty remote directories
 
 ### Sidecar uploads / downloads
 

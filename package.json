@@ -12,7 +12,7 @@
     "release:major": "npm run build:noop && npm version major && git push && git push --tags && npm publish --access public",
     "build:noop": "echo \"nothing to build\"",
     "ncu-me": "ncu -i --format group",
-    "tree": "tree -a -L 3 ./ > directory structure.txt"
+    "tree": "tree -a -L 3 ./src > directory-structure.txt"
   },
   "keywords": [
     "hugo",

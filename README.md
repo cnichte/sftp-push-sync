@@ -153,15 +153,17 @@ The dry run is a great way to compare files and fill the cache.
 
 ### How ist works
 
-Es werden 5 SChritten abgearbeitet:
+There are 7 steps to follow:
 
 - Phase 1: Scan local files
 - Phase 2: Scan remote files
 - Phase 3: Compare & decide
 - Phase 4: Removing orphaned remote files
-- Preparing remote directories
-- Phase 5: Apply changes
-- Cleaning up empty remote directories
+- Phase 5: Preparing remote directories
+- Phase 6: Apply changes
+- Phase 7: Cleaning up empty remote directories
+
+Phases 1 and 2 can optionally be executed in parallel. Phase 6 always runs in parallel with as many worker threads as the FTP server allows.
 
 ### Sidecar uploads / downloads
 

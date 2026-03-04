@@ -1,5 +1,9 @@
 # Changelog
 
+## [2.3.0] - 2026-03-04
+
+- Keep-Alive enabled - a Keep-Alive packet is sent every 10 seconds.
+
 ## [2.1.0] - 2025-11-19
 
 Sync only handles files and creates missing directories during upload.

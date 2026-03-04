@@ -730,6 +730,10 @@ export class SftpPushSyncApp {
         port: this.connection.port,
         username: this.connection.user,
         password: this.connection.password,
+        // Keep-Alive to prevent server disconnection during long operations
+        keepaliveInterval: 10000,  // Send keepalive every 10 seconds
+        keepaliveCountMax: 10,     // Allow up to 10 missed keepalives before disconnect
+        readyTimeout: 30000,       // 30s timeout for initial connection
       });
       connected = true;
       this.log(`${TAB_A}${pc.green("✔ Connected to SFTP.")}`);
@@ -838,7 +842,7 @@ export class SftpPushSyncApp {
       this.log("");
 
       // Phase 3 – Analyse Differences (delegiert an Helper)
-      this.log(pc.bold(pc.cyan("🔎 Phase 3: Compare & decide …")));
+      this.log(pc.bold(pc.cyan("🔎 Phase 3: Compare & Decide …")));
 
       const { getLocalHash, getRemoteHash, save: saveCache } = this.hashCache;
 

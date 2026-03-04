@@ -157,7 +157,7 @@ There are 7 steps to follow:
 
 - Phase 1: Scan local files
 - Phase 2: Scan remote files
-- Phase 3: Compare & decide
+- Phase 3: Compare & Decide
 - Phase 4: Removing orphaned remote files
 - Phase 5: Preparing remote directories
 - Phase 6: Apply changes
@@ -258,7 +258,8 @@ However, it should also manage directories:
 
 You can safely delete the local cache at any time. The first analysis will then take longer, because remote hashes will be streamed again. After that, everything will run fast.
 
-Note: The first run always takes a while, especially with lots of media – so be patient! Once the cache is full, it will be faster.
+Note 1: The first run always takes a while, especially with lots of media – so be patient! Once the cache is full, it will be faster. 
+Note 2: Reliability and accuracy are more important to me than speed.
 
 ## Example Output
 

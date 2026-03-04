@@ -19,7 +19,7 @@ Features:
 - adds, updates, deletes files
 - text diff detection
 - Binary files (images, video, audio, PDF, etc.): SHA-256 hash comparison
-- Hashes are cached in .sync-cache.*.json
+- Hashes are cached in `.sync-cache.*.ndjson`
 - Parallel uploads/deletions via worker pool
 - include/exclude patterns
 - Sidecar uploads / downloads - Bypassing the sync process

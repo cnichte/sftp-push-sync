@@ -116,6 +116,7 @@ export async function walkLocalPlain(root) {
 
 /**
  * Remote-Walker mit INCLUDE/EXCLUDE über filterFn
+ * Optimiert: Parallelisierte Verzeichnis-Traversierung
  */
 export async function walkRemote(
   sftp,
@@ -125,13 +126,43 @@ export async function walkRemote(
     progress = null,
     scanChunk = 100,
     log = null,
+    concurrency = 5,  // Max parallel directory listings
   } = {}
 ) {
   const result = new Map();
   let scanned = 0;
 
+  // Semaphore für Concurrency-Kontrolle
+  let activeCount = 0;
+  const waiting = [];
+
+  async function acquireSemaphore() {
+    if (activeCount < concurrency) {
+      activeCount++;
+      return;
+    }
+    await new Promise((resolve) => waiting.push(resolve));
+    activeCount++;
+  }
+
+  function releaseSemaphore() {
+    activeCount--;
+    if (waiting.length > 0) {
+      const next = waiting.shift();
+      next();
+    }
+  }
+
   async function recurse(remoteDir, prefix) {
-    const items = await sftp.list(remoteDir);
+    await acquireSemaphore();
+    let items;
+    try {
+      items = await sftp.list(remoteDir);
+    } finally {
+      releaseSemaphore();
+    }
+
+    const subdirPromises = [];
 
     for (const item of items) {
       if (!item.name || item.name === "." || item.name === "..") continue;
@@ -142,7 +173,8 @@ export async function walkRemote(
       if (filterFn && !filterFn(rel)) continue;
 
       if (item.type === "d") {
-        await recurse(full, rel);
+        // Parallele Verarbeitung von Unterverzeichnissen
+        subdirPromises.push(recurse(full, rel));
       } else {
         result.set(rel, {
           rel,
@@ -166,6 +198,9 @@ export async function walkRemote(
         }
       }
     }
+
+    // Warte auf alle Unterverzeichnisse parallel
+    await Promise.all(subdirPromises);
   }
 
   await recurse(remoteRoot, "");

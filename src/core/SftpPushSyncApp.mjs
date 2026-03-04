@@ -736,6 +736,12 @@ export class SftpPushSyncApp {
         readyTimeout: 30000,       // 30s timeout for initial connection
       });
       connected = true;
+      
+      // Increase max listeners for parallel operations
+      if (sftp.client) {
+        sftp.client.setMaxListeners(50);
+      }
+      
       this.log(`${TAB_A}${pc.green("✔ Connected to SFTP.")}`);
 
       if (!skipSync && !fs.existsSync(this.connection.localRoot)) {

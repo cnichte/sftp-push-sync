@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.4.0] - 2026-03-04
+
+- Parallel remote walker walkers.mjs: scans 8 directories simultaneously
+- Batch analysis with concurrency compare.mjs: 8 file comparisons in parallel
+- Parallel hash calculation: local + remote hash simultaneously
+- Keep-alive: SftpPushSyncApp.mjs prevents server disconnection
+
 ## [2.3.0] - 2026-03-04
 
 - Keep-Alive enabled - a Keep-Alive packet is sent every 10 seconds.

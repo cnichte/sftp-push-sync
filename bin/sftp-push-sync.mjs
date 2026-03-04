@@ -80,6 +80,7 @@ let DRY_RUN = false;
 let RUN_UPLOAD_LIST = false;
 let RUN_DOWNLOAD_LIST = false;
 let SKIP_SYNC = false;
+let SIZE_ONLY = false;
 let cliLogLevel = null;
 let configPath = undefined;
 
@@ -91,6 +92,9 @@ for (let i = 0; i < rest.length; i += 1) {
   switch (a) {
     case "--dry-run":
       DRY_RUN = true;
+      break;
+    case "--size-only":
+      SIZE_ONLY = true;
       break;
     case "--sidecar-upload":
       RUN_UPLOAD_LIST = true;

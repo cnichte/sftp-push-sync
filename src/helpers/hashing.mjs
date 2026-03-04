@@ -1,9 +1,9 @@
 /**
  * hashing.mjs
- * 
+ *
  * @author Carsten Nichte, 2025 / https://carsten-nichte.de/
- * 
- */ 
+ *
+ */
 // src/helpers/hashing.mjs
 import fs from "fs";
 import fsp from "fs/promises";
@@ -53,7 +53,7 @@ export async function hashRemoteFile(sftp, remotePath) {
 export function createHashCache({
   cachePath,
   namespace,
-  flushInterval = 50,
+  flushInterval = 25,  // Save more frequently to release memory
 }) {
   const ns = namespace || "default";
 
@@ -85,8 +85,40 @@ export function createHashCache({
 
   async function save(force = false) {
     if (!dirty && !force) return;
-    const data = JSON.stringify(cache, null, 2);
-    await fsp.writeFile(cachePath, data, "utf8");
+
+    // Stream-basiertes Schreiben für große Caches
+    // Verwendet for...in statt Object.keys() um Speicher zu sparen
+    const fd = await fsp.open(cachePath, 'w');
+    try {
+      await fd.write('{"version":1,"local":{');
+
+      let firstLocal = true;
+      for (const key in cache.local) {
+        if (Object.prototype.hasOwnProperty.call(cache.local, key)) {
+          const entry = cache.local[key];
+          const line = `${JSON.stringify(key)}:${JSON.stringify(entry)}`;
+          await fd.write(firstLocal ? line : ',' + line);
+          firstLocal = false;
+        }
+      }
+
+      await fd.write('},"remote":{');
+
+      let firstRemote = true;
+      for (const key in cache.remote) {
+        if (Object.prototype.hasOwnProperty.call(cache.remote, key)) {
+          const entry = cache.remote[key];
+          const line = `${JSON.stringify(key)}:${JSON.stringify(entry)}`;
+          await fd.write(firstRemote ? line : ',' + line);
+          firstRemote = false;
+        }
+      }
+
+      await fd.write('}}');
+    } finally {
+      await fd.close();
+    }
+
     dirty = false;
     dirtyCount = 0;
   }

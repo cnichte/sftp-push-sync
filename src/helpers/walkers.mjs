@@ -1,9 +1,9 @@
 /**
  * walkers.mjs
- * 
+ *
  * @author Carsten Nichte, 2025 / https://carsten-nichte.de/
- * 
- */ 
+ *
+ */
 // src/helpers/walkers.mjs
 import fsp from "fs/promises";
 import path from "path";

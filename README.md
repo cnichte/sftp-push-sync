@@ -26,6 +26,11 @@ Features:
 
 The file `sftp-push-sync.mjs` is pure JavaScript (ESM), not TypeScript. Node.js can execute it directly as long as "type": "module" is specified in package.json or the file has the extension .mjs.
 
+## Breaking changes in 3.0.0
+
+- New Cache Mechanism: NDJSON instead of JSON.
+- The cache can now handle any number of files.
+
 ## Breaking changes in 2.0.0
 
 - The flags `--upload-list` / `--download-list` have been replaced by
@@ -253,12 +258,12 @@ However, it should also manage directories:
 
 ## Which files are created?
 
-- The cache files: `.sync-cache.*.json`
+- The cache files: `.sync-cache.*.ndjson`. The old ones can be deleted: `.sync-cache.*.json`
 - The log file: `.sftp-push-sync.{target}.log` (Optional, overwritten with each run)
 
 You can safely delete the local cache at any time. The first analysis will then take longer, because remote hashes will be streamed again. After that, everything will run fast.
 
-Note 1: The first run always takes a while, especially with lots of media – so be patient! Once the cache is full, it will be faster. 
+Note 1: The first run always takes a while, especially with lots of media – so be patient! Once the cache is full, it will be faster.
 Note 2: Reliability and accuracy are more important to me than speed.
 
 ## Example Output

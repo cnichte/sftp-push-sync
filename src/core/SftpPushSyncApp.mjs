@@ -17,7 +17,7 @@ import { SyncLogger } from "./SyncLogger.mjs";
 import { ScanProgressController } from "./ScanProgressController.mjs";
 
 import { toPosix, shortenPathForProgress } from "../helpers/directory.mjs";
-import { createHashCache } from "../helpers/hashing.mjs";
+import { createHashCacheNDJSON, migrateFromJsonCache } from "../helpers/hash-cache-ndjson.mjs";
 import { walkLocal, walkRemote } from "../helpers/walkers.mjs";
 import {
   analyseDifferences,
@@ -186,6 +186,50 @@ export class SftpPushSyncApp {
   vlog(...msg) {
     if (!this.isVerbose) return;
     this._consoleAndLog("", ...msg);
+  }
+
+  // ---------------------------------------------------------
+  // SFTP Connection Helpers
+  // ---------------------------------------------------------
+
+  /**
+   * Check if SFTP connection is still alive
+   */
+  async _isConnected(sftp) {
+    try {
+      // Try a minimal operation to check connection
+      await sftp.cwd();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Reconnect to SFTP server
+   */
+  async _reconnect(sftp) {
+    try {
+      await sftp.end();
+    } catch {
+      // Ignore errors when closing dead connection
+    }
+
+    await sftp.connect({
+      host: this.connection.host,
+      port: this.connection.port,
+      username: this.connection.user,
+      password: this.connection.password,
+      keepaliveInterval: 10000,
+      keepaliveCountMax: 10,
+      readyTimeout: 30000,
+    });
+
+    if (sftp.client) {
+      sftp.client.setMaxListeners(50);
+    }
+
+    this.log(`${TAB_A}${pc.green("✔ Reconnected to SFTP.")}`);
   }
 
   // ---------------------------------------------------------
@@ -650,14 +694,20 @@ export class SftpPushSyncApp {
     ];
     this.autoExcluded = new Set();
 
-    // Hash-Cache
-    const syncCacheName =
-      targetConfig.syncCache || `.sync-cache.${target}.json`;
-    const cachePath = path.resolve(syncCacheName);
-    this.hashCache = createHashCache({
-      cachePath,
+    // Hash-Cache (NDJSON - human-readable, scales to 100k+ files)
+    const oldJsonCacheName = targetConfig.syncCache || `.sync-cache.${target}.json`;
+    const oldJsonCachePath = path.resolve(oldJsonCacheName);
+    const ndjsonCachePath = path.resolve(`.sync-cache.${target}.ndjson`);
+
+    // Migrate from old JSON cache if exists
+    const migration = await migrateFromJsonCache(oldJsonCachePath, ndjsonCachePath, target);
+    if (migration.migrated) {
+      console.log(pc.green(`   ✔ Migrated ${migration.localCount + migration.remoteCount} cache entries from JSON to NDJSON`));
+    }
+
+    this.hashCache = await createHashCacheNDJSON({
+      cachePath: ndjsonCachePath,
       namespace: target,
-      flushInterval: 50,
     });
 
     // Logger
@@ -736,12 +786,12 @@ export class SftpPushSyncApp {
         readyTimeout: 30000,       // 30s timeout for initial connection
       });
       connected = true;
-      
+
       // Increase max listeners for parallel operations
       if (sftp.client) {
         sftp.client.setMaxListeners(50);
       }
-      
+
       this.log(`${TAB_A}${pc.green("✔ Connected to SFTP.")}`);
 
       if (!skipSync && !fs.existsSync(this.connection.localRoot)) {
@@ -850,7 +900,7 @@ export class SftpPushSyncApp {
       // Phase 3 – Analyse Differences (delegiert an Helper)
       this.log(pc.bold(pc.cyan("🔎 Phase 3: Compare & Decide …")));
 
-      const { getLocalHash, getRemoteHash, save: saveCache } = this.hashCache;
+      const { getLocalHash, getRemoteHash } = this.hashCache;
 
       const diffResult = await analyseDifferences({
         local,
@@ -885,6 +935,12 @@ export class SftpPushSyncApp {
       this.log("");
       this.log(pc.bold(pc.cyan("🧹 Phase 4: Removing orphaned remote files …")));
 
+      // Reconnect if connection was lost during analysis
+      if (!await this._isConnected(sftp)) {
+        this.log(`${TAB_A}${pc.yellow("⚠ Connection lost, reconnecting…")}`);
+        await this._reconnect(sftp);
+      }
+
       toDelete = computeRemoteDeletes({ local, remote });
 
       if (toDelete.length === 0) {
@@ -899,6 +955,13 @@ export class SftpPushSyncApp {
       if (!dryRun && (toAdd.length || toUpdate.length)) {
         this.log("");
         this.log(pc.bold(pc.cyan("📁 Preparing remote directories …")));
+
+        // Ensure connection before directory operations
+        if (!await this._isConnected(sftp)) {
+          this.log(`${TAB_A}${pc.yellow("⚠ Connection lost, reconnecting…")}`);
+          await this._reconnect(sftp);
+        }
+
         await this.ensureAllRemoteDirsExist(
           sftp,
           this.connection.remoteRoot,
@@ -911,6 +974,12 @@ export class SftpPushSyncApp {
       if (!dryRun) {
         this.log("");
         this.log(pc.bold(pc.cyan("🚚 Phase 5: Apply changes …")));
+
+        // Ensure fresh connection before uploads
+        if (!await this._isConnected(sftp)) {
+          this.log(`${TAB_A}${pc.yellow("⚠ Connection lost, reconnecting…")}`);
+          await this._reconnect(sftp);
+        }
 
         // Upload new files
         await this.runTasks(
@@ -976,13 +1045,21 @@ export class SftpPushSyncApp {
         this.log(
           pc.bold(pc.cyan("🧹 Cleaning up empty remote directories …"))
         );
+
+        // Ensure connection before cleanup
+        if (!await this._isConnected(sftp)) {
+          this.log(`${TAB_A}${pc.yellow("⚠ Connection lost, reconnecting…")}`);
+          await this._reconnect(sftp);
+        }
+
         await this.cleanupEmptyDirs(sftp, this.connection.remoteRoot, dryRun);
       }
 
       const duration = ((Date.now() - start) / 1000).toFixed(2);
 
-      // Cache am Ende sicher schreiben
-      await saveCache(true);
+      // Save cache and close
+      await this.hashCache.save();
+      await this.hashCache.close();
 
       // Summary
       this.log(hr1());
@@ -1039,9 +1116,9 @@ export class SftpPushSyncApp {
       }
       process.exitCode = 1;
       try {
-        // falls hashCache existiert, Cache noch flushen
-        if (this.hashCache?.save) {
-          await this.hashCache.save(true);
+        // falls hashCache existiert, Cache schließen
+        if (this.hashCache?.close) {
+          await this.hashCache.close();
         }
       } catch {
         // ignore

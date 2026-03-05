@@ -35,28 +35,61 @@ export function hashLocalFile(filePath) {
 
 /**
  * Streaming-SHA256 für Remote-Datei via ssh2-sftp-client
- * Mit Timeout, um hängende Verbindungen zu erkennen.
+ * Mit IDLE-Timeout: nur wenn keine Daten mehr fließen für X Sekunden.
+ * Große Dateien werden korrekt behandelt - solange Daten ankommen, kein Timeout.
+ *
+ * @param {Object} sftp - SFTP client
+ * @param {string} remotePath - Remote file path
+ * @param {number} idleTimeoutMs - Timeout in ms when NO data is received (default: 60000)
+ * @param {number} fileSizeBytes - File size (for logging)
  */
-export async function hashRemoteFile(sftp, remotePath, timeoutMs = 60000) {
+export async function hashRemoteFile(sftp, remotePath, idleTimeoutMs = 60000, fileSizeBytes = 0) {
   const hash = createHash("sha256");
+  let lastDataTime = Date.now();
+  let totalReceived = 0;
+  let timeoutId = null;
+  let rejectFn = null;
+
+  // Promise that rejects on idle timeout
+  const idleTimeoutPromise = new Promise((_, reject) => {
+    rejectFn = reject;
+    
+    const checkIdle = () => {
+      const idleTime = Date.now() - lastDataTime;
+      if (idleTime >= idleTimeoutMs) {
+        const receivedMB = (totalReceived / (1024 * 1024)).toFixed(1);
+        reject(new Error(`Idle timeout (${Math.round(idleTimeoutMs/1000)}s no data) at ${receivedMB}MB for ${remotePath}`));
+      } else {
+        // Check again in 5 seconds
+        timeoutId = setTimeout(checkIdle, 5000);
+      }
+    };
+    
+    // Start checking after initial timeout
+    timeoutId = setTimeout(checkIdle, idleTimeoutMs);
+  });
 
   const writable = new Writable({
     write(chunk, enc, cb) {
+      lastDataTime = Date.now(); // Reset idle timer on each chunk
+      totalReceived += chunk.length;
       hash.update(chunk);
       cb();
     },
   });
 
-  // Timeout-Promise
-  const timeoutPromise = new Promise((_, reject) => {
-    setTimeout(() => reject(new Error(`Timeout downloading ${remotePath}`)), timeoutMs);
-  });
-
-  // Race between download and timeout
-  await Promise.race([
-    sftp.get(remotePath, writable),
-    timeoutPromise,
-  ]);
+  try {
+    // Race between download and idle timeout
+    await Promise.race([
+      sftp.get(remotePath, writable),
+      idleTimeoutPromise,
+    ]);
+  } finally {
+    // Clean up timeout
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
 
   return hash.digest("hex");
 }
@@ -71,8 +104,9 @@ export async function hashRemoteFile(sftp, remotePath, timeoutMs = 60000) {
  * @param {string} options.cachePath - Path to the NDJSON file (e.g., ".sync-cache.prod.ndjson")
  * @param {string} options.namespace - Namespace for keys (e.g., "prod")
  * @param {number} options.autoSaveInterval - Save after this many changes (default: 1000)
+ * @param {Function} options.vlog - Optional verbose logging function
  */
-export async function createHashCacheNDJSON({ cachePath, namespace, autoSaveInterval = 1000 }) {
+export async function createHashCacheNDJSON({ cachePath, namespace, autoSaveInterval = 1000, vlog }) {
   const ns = namespace || "default";
 
   // In-memory storage
@@ -94,6 +128,7 @@ export async function createHashCacheNDJSON({ cachePath, namespace, autoSaveInte
       await fsp.access(cachePath);
     } catch {
       // File doesn't exist - start fresh
+      if (vlog) vlog(`   Cache file not found, starting fresh: ${cachePath}`);
       return;
     }
 
@@ -203,7 +238,8 @@ export async function createHashCacheNDJSON({ cachePath, namespace, autoSaveInte
 
     // Cache miss or stale: compute new hash
     const filePath = meta.fullPath || meta.remotePath;
-    const hash = await hashRemoteFile(sftp, filePath);
+    // Pass file size for dynamic timeout calculation
+    const hash = await hashRemoteFile(sftp, filePath, 60000, meta.size || 0);
 
     remoteCache.set(key, {
       size: meta.size,

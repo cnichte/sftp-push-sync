@@ -23,6 +23,8 @@ import path from "path";
  *  - analyzeChunk: Progress-Schrittgröße
  *  - updateProgress(prefix, current, total, rel): optional
  *  - concurrency: Max parallele Vergleiche (default: 5)
+ *  - log: optional logging function for errors/warnings
+ *  - maxSizeForHash: Files larger than this skip hash comparison (default: 50MB)
  */
 export async function analyseDifferences({
   local,
@@ -34,7 +36,13 @@ export async function analyseDifferences({
   analyzeChunk = 10,
   updateProgress,
   concurrency = 10,
+  log,
+  maxSizeForHash = 50 * 1024 * 1024, // 50MB default
 }) {
+  // Track errors for summary
+  const compareErrors = [];
+  // Track large files skipped
+  const largeFilesSkipped = [];
   const toAdd = [];
   const toUpdate = [];
 
@@ -45,6 +53,7 @@ export async function analyseDifferences({
   // Phase 1: Schneller Vorab-Check ohne SFTP
   // - Dateien nur lokal → direkt zu toAdd
   // - Size-Vergleich für existierende Dateien
+  // - Große Dateien: nur MTime-Vergleich (kein Hash-Download)
   const keysNeedContentCompare = [];
 
   for (const rel of localKeys) {
@@ -58,20 +67,45 @@ export async function analyseDifferences({
     } else if (l.size !== r.size) {
       // Size unterschiedlich → Changed (kein SFTP-Call nötig)
       toUpdate.push({ rel, local: l, remote: r, remotePath });
+    // } else if (l.size > maxSizeForHash) {
+    //   // Große Datei mit gleicher Size: nur MTime vergleichen
+    //   // Remote modifyTime ist String wie "2026-03-05", local mtimeMs ist Timestamp
+    //   const localDate = new Date(l.mtimeMs).toISOString().split('T')[0];
+    //   const remoteDate = r.modifyTime ? r.modifyTime.split('T')[0] : '';
+    //   
+    //   if (localDate > remoteDate) {
+    //     // Local ist neuer → Changed
+    //     toUpdate.push({ rel, local: l, remote: r, remotePath });
+    //     if (log) {
+    //       const sizeMB = (l.size / (1024 * 1024)).toFixed(1);
+    //       log(`   ℹ Large file (${sizeMB}MB) newer locally: ${rel}`);
+    //     }
+    //   } else {
+    //     largeFilesSkipped.push({ rel, size: l.size });
+    //   }
     } else {
-      // Size gleich → Content-Vergleich nötig
+      // Size gleich, normale Größe → Content-Vergleich nötig
       keysNeedContentCompare.push(rel);
     }
 
     checked++;
     if (updateProgress && checked % analyzeChunk === 0) {
-      updateProgress("Analyse (Size): ", checked, totalToCheck, rel);
+      updateProgress("Analyse (quick): ", checked, totalToCheck, rel);
     }
   }
 
+  // Final progress update for Phase 1
+  if (updateProgress) {
+    updateProgress("Analyse (quick): ", totalToCheck, totalToCheck, "done");
+  }
+
   // Phase 2: Content-Vergleich in echten Batches
-  // Nur für Dateien mit gleicher Size
+  // Nur für Dateien mit gleicher Size (und unter maxSizeForHash)
   const totalContentCompare = keysNeedContentCompare.length;
+
+  if (totalContentCompare > 0 && log) {
+    log(`   → ${totalContentCompare} files need content comparison`);
+  }
 
   for (let i = 0; i < totalContentCompare; i += concurrency) {
     const batch = keysNeedContentCompare.slice(i, i + concurrency);
@@ -114,8 +148,14 @@ export async function analyseDifferences({
               : null;
           }
         } catch (err) {
-          // Bei Fehler als changed markieren (sicherer)
-          return { rel, local: l, remote: r, remotePath, changed: true };
+          // Log the error so user can see what's happening
+          const errMsg = err?.message || String(err);
+          compareErrors.push({ rel, error: errMsg });
+          if (log) {
+            log(`   ⚠ Compare error for ${rel}: ${errMsg}`);
+          }
+          // Mark as changed (sicherer) - file will be re-uploaded
+          return { rel, local: l, remote: r, remotePath, changed: true, hadError: true };
         }
       })
     );
@@ -127,14 +167,14 @@ export async function analyseDifferences({
       }
     }
 
-    // Progress update
+    // Progress update - show as separate progress (doesn't jump back)
     const progressCount = Math.min(i + batch.length, totalContentCompare);
     if (updateProgress) {
-      updateProgress("Analyse (Content): ", checked + progressCount, totalToCheck + totalContentCompare, batch[batch.length - 1]);
+      updateProgress("Analyse (hash): ", progressCount, totalContentCompare, batch[batch.length - 1]);
     }
   }
 
-  return { toAdd, toUpdate };
+  return { toAdd, toUpdate, compareErrors, largeFilesSkipped };
 }
 
 /**

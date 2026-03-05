@@ -200,7 +200,10 @@ export class SftpPushSyncApp {
       // Try a minimal operation to check connection
       await sftp.cwd();
       return true;
-    } catch {
+    } catch (e) {
+      if (this.isVerbose) {
+        this.vlog(`${TAB_A}${pc.dim(`Connection check failed: ${e?.message || e}`)}`);
+      }
       return false;
     }
   }
@@ -213,8 +216,11 @@ export class SftpPushSyncApp {
       try {
         try {
           await sftp.end();
-        } catch {
+        } catch (e) {
           // Ignore errors when closing dead connection
+          if (this.isVerbose) {
+            this.vlog(`${TAB_A}${pc.dim(`Closing old connection failed (expected): ${e?.message || e}`)}`);
+          }
         }
 
         // Wait before reconnecting (exponential backoff)
@@ -251,6 +257,45 @@ export class SftpPushSyncApp {
         }
         this.wlog(pc.yellow(`⚠ Reconnect attempt ${attempt} failed: ${msg}`));
       }
+    }
+  }
+
+  /**
+   * Upload a file with progress reporting for large files.
+   * Uses fastPut for files > threshold, with automatic fallback to put on failure.
+   */
+  async _uploadFile(sftp, localPath, remotePath, rel, size) {
+    const LARGE_FILE_THRESHOLD = 5 * 1024 * 1024; // 5MB
+    const sizeMB = (size / (1024 * 1024)).toFixed(1);
+    
+    // For small files, just use put
+    if (size < LARGE_FILE_THRESHOLD) {
+      await sftp.put(localPath, remotePath);
+      return;
+    }
+
+    // For large files, try fastPut with progress
+    let lastReportedPercent = 0;
+    const shortRel = rel.length > 50 ? '...' + rel.slice(-47) : rel;
+
+    try {
+      await sftp.fastPut(localPath, remotePath, {
+        step: (transferred, chunk, total) => {
+          const percent = Math.floor((transferred / total) * 100);
+          // Only log at 25%, 50%, 75%, 100%
+          if (percent >= lastReportedPercent + 25) {
+            lastReportedPercent = Math.floor(percent / 25) * 25;
+            this.log(`${TAB_A}${pc.dim(`  ↑ ${sizeMB}MB ${percent}%: ${shortRel}`)}`);
+          }
+        }
+      });
+    } catch (fastPutErr) {
+      // fastPut not supported by server, fall back to regular put
+      if (this.isVerbose) {
+        this.vlog(`${TAB_A}${pc.dim(`  fastPut failed, using put: ${fastPutErr?.message}`)}`);
+      }
+      this.log(`${TAB_A}${pc.dim(`  Uploading ${sizeMB}MB: ${shortRel}`)}`);
+      await sftp.put(localPath, remotePath);
     }
   }
 
@@ -936,6 +981,7 @@ export class SftpPushSyncApp {
     this.hashCache = await createHashCacheNDJSON({
       cachePath: ndjsonCachePath,
       namespace: target,
+      vlog: this.isVerbose ? (...m) => console.log(...m) : null,
     });
 
     // Logger
@@ -1144,10 +1190,28 @@ export class SftpPushSyncApp {
         analyzeChunk: this.analyzeChunk,
         updateProgress: (prefix, current, total, rel) =>
           this.updateProgress2(prefix, current, total, rel, "Files"),
+        log: this.isVerbose ? (...m) => this.log(...m) : null,
       });
 
       toAdd = diffResult.toAdd;
       toUpdate = diffResult.toUpdate;
+
+      // Report large files that skipped hash comparison
+      if (diffResult.largeFilesSkipped && diffResult.largeFilesSkipped.length > 0 && this.isVerbose) {
+        const totalSizeMB = diffResult.largeFilesSkipped.reduce((sum, f) => sum + f.size, 0) / (1024 * 1024);
+        this.log(`   ℹ ${diffResult.largeFilesSkipped.length} large files (${totalSizeMB.toFixed(0)}MB total) skipped hash compare (same size/date)`);
+      }
+
+      // Report compare errors if any
+      if (diffResult.compareErrors && diffResult.compareErrors.length > 0) {
+        this.log("");
+        this.wlog(pc.yellow(`⚠ ${diffResult.compareErrors.length} files had compare errors (will be re-uploaded):`));
+        if (this.isVerbose) {
+          for (const { rel, error } of diffResult.compareErrors) {
+            this.wlog(pc.yellow(`   - ${rel}: ${error}`));
+          }
+        }
+      }
 
       if (toAdd.length === 0 && toUpdate.length === 0) {
         this.log("");
@@ -1217,14 +1281,14 @@ export class SftpPushSyncApp {
         await this.runTasks(
           toAdd,
           this.connection.workers,
-          async ({ local: l, remotePath }) => {
+          async ({ local: l, remotePath, rel }) => {
             const remoteDir = path.posix.dirname(remotePath);
             try {
               await sftp.mkdir(remoteDir, true);
             } catch {
               // Directory may already exist
             }
-            await sftp.put(l.localPath, remotePath);
+            await this._uploadFile(sftp, l.localPath, remotePath, rel, l.size);
           },
           "Uploads (new)",
           sftp
@@ -1234,14 +1298,14 @@ export class SftpPushSyncApp {
         await this.runTasks(
           toUpdate,
           this.connection.workers,
-          async ({ local: l, remotePath }) => {
+          async ({ local: l, remotePath, rel }) => {
             const remoteDir = path.posix.dirname(remotePath);
             try {
               await sftp.mkdir(remoteDir, true);
             } catch {
               // Directory may already exist
             }
-            await sftp.put(l.localPath, remotePath);
+            await this._uploadFile(sftp, l.localPath, remotePath, rel, l.size);
           },
           "Uploads (update)",
           sftp
@@ -1356,8 +1420,11 @@ export class SftpPushSyncApp {
         if (this.hashCache?.close) {
           await this.hashCache.close();
         }
-      } catch {
-        // ignore
+      } catch (e) {
+        // Cache close failed during error cleanup
+        if (this.isVerbose) {
+          this.vlog(`${TAB_A}${pc.dim(`Cache close during cleanup failed: ${e?.message || e}`)}`)
+        }
       }
     } finally {
       try {

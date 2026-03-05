@@ -1,6 +1,6 @@
 # Changelog
 
-## [3.0.1] - 2026-03-05
+## [3.0.2] - 2026-03-05
 
 - stability improvements especialy during large and longtime uploads, error handling, log with datetime.
 

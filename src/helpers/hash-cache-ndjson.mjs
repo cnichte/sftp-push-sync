@@ -35,8 +35,9 @@ export function hashLocalFile(filePath) {
 
 /**
  * Streaming-SHA256 für Remote-Datei via ssh2-sftp-client
+ * Mit Timeout, um hängende Verbindungen zu erkennen.
  */
-export async function hashRemoteFile(sftp, remotePath) {
+export async function hashRemoteFile(sftp, remotePath, timeoutMs = 60000) {
   const hash = createHash("sha256");
 
   const writable = new Writable({
@@ -46,7 +47,17 @@ export async function hashRemoteFile(sftp, remotePath) {
     },
   });
 
-  await sftp.get(remotePath, writable);
+  // Timeout-Promise
+  const timeoutPromise = new Promise((_, reject) => {
+    setTimeout(() => reject(new Error(`Timeout downloading ${remotePath}`)), timeoutMs);
+  });
+
+  // Race between download and timeout
+  await Promise.race([
+    sftp.get(remotePath, writable),
+    timeoutPromise,
+  ]);
+
   return hash.digest("hex");
 }
 

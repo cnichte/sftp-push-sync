@@ -206,30 +206,52 @@ export class SftpPushSyncApp {
   }
 
   /**
-   * Reconnect to SFTP server
+   * Reconnect to SFTP server with retry logic
    */
-  async _reconnect(sftp) {
-    try {
-      await sftp.end();
-    } catch {
-      // Ignore errors when closing dead connection
+  async _reconnect(sftp, maxRetries = 3) {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        try {
+          await sftp.end();
+        } catch {
+          // Ignore errors when closing dead connection
+        }
+
+        // Wait before reconnecting (exponential backoff)
+        if (attempt > 1) {
+          const waitTime = 1000 * Math.pow(2, attempt - 1); // 2s, 4s, 8s
+          this.log(`${TAB_A}${pc.yellow(`⏳ Waiting ${waitTime/1000}s before retry ${attempt}/${maxRetries}…`)}`);
+          await new Promise(r => setTimeout(r, waitTime));
+        }
+
+        await sftp.connect({
+          host: this.connection.host,
+          port: this.connection.port,
+          username: this.connection.user,
+          password: this.connection.password,
+          keepaliveInterval: 5000,     // More frequent keepalive (5s instead of 10s)
+          keepaliveCountMax: 6,        // Disconnect after 30s of no response
+          readyTimeout: 60000,         // 60s timeout for initial connection
+          retries: 2,                  // Internal retries
+          retry_factor: 2,
+          retry_minTimeout: 2000,
+        });
+
+        if (sftp.client) {
+          sftp.client.setMaxListeners(50);
+        }
+
+        this.log(`${TAB_A}${pc.green("✔ Reconnected to SFTP.")}`);
+        return; // Success
+      } catch (err) {
+        const msg = err?.message || String(err);
+        if (attempt === maxRetries) {
+          this.elog(pc.red(`❌ Failed to reconnect after ${maxRetries} attempts: ${msg}`));
+          throw err;
+        }
+        this.wlog(pc.yellow(`⚠ Reconnect attempt ${attempt} failed: ${msg}`));
+      }
     }
-
-    await sftp.connect({
-      host: this.connection.host,
-      port: this.connection.port,
-      username: this.connection.user,
-      password: this.connection.password,
-      keepaliveInterval: 10000,
-      keepaliveCountMax: 10,
-      readyTimeout: 30000,
-    });
-
-    if (sftp.client) {
-      sftp.client.setMaxListeners(50);
-    }
-
-    this.log(`${TAB_A}${pc.green("✔ Reconnected to SFTP.")}`);
   }
 
   // ---------------------------------------------------------
@@ -333,17 +355,22 @@ export class SftpPushSyncApp {
   }
 
   // ---------------------------------------------------------
-  // Worker-Pool
+  // Worker-Pool with auto-reconnect
   // ---------------------------------------------------------
 
-  async runTasks(items, workerCount, handler, label = "Tasks") {
+  async runTasks(items, workerCount, handler, label = "Tasks", sftp = null) {
     if (!items || items.length === 0) return;
 
     const total = items.length;
     let done = 0;
     let index = 0;
+    let failedCount = 0;
     const workers = [];
     const actualWorkers = Math.max(1, Math.min(workerCount, total));
+
+    // Mutex for reconnection (only one worker reconnects at a time)
+    let reconnecting = false;
+    let reconnectWaiters = 0;
 
     const worker = async () => {
       // eslint-disable-next-line no-constant-condition
@@ -353,13 +380,82 @@ export class SftpPushSyncApp {
         index += 1;
         const item = items[i];
 
-        try {
-          await handler(item);
-        } catch (err) {
-          this.elog(
-            pc.red(`${TAB_A}⚠️ Error in ${label}:`),
-            err?.message || err
-          );
+        let retries = 0;
+        const maxRetries = 5; // Increased from 2 to 5 for unstable servers
+
+        while (retries <= maxRetries) {
+          try {
+            await handler(item);
+            break; // Success, exit retry loop
+          } catch (err) {
+            const msg = err?.message || String(err);
+            const isConnectionError =
+              msg.includes("No SFTP connection") ||
+              msg.includes("ECONNRESET") ||
+              msg.includes("ETIMEDOUT") ||
+              msg.includes("ECONNREFUSED") ||
+              msg.includes("connection") ||
+              msg.includes("Channel open failure") ||
+              msg.includes("socket") ||
+              msg.includes("SSH");
+
+            if (isConnectionError && sftp && retries < maxRetries) {
+              // Wait if another worker is already reconnecting
+              let waitCount = 0;
+              reconnectWaiters++;
+              if (reconnecting && this.isVerbose) {
+                this.log(`${TAB_A}${pc.dim(`Worker waiting for reconnect (${reconnectWaiters} waiting)…`)}`);
+              }
+              while (reconnecting && waitCount < 120) { // Max 60 seconds wait
+                await new Promise(r => setTimeout(r, 500));
+                waitCount++;
+                // Log every 10 seconds while waiting
+                if (waitCount % 20 === 0 && this.isVerbose) {
+                  this.log(`${TAB_A}${pc.dim(`Still waiting for reconnect… (${waitCount / 2}s)`)}`);
+                }
+              }
+              reconnectWaiters--;
+
+              // Check if reconnection is still needed
+              if (!await this._isConnected(sftp)) {
+                reconnecting = true;
+                this.log(`${TAB_A}${pc.yellow("⚠ Connection lost during " + label + ", reconnecting…")}`);
+                try {
+                  await this._reconnect(sftp);
+                  this.log(`${TAB_A}${pc.green("✔ Reconnected, resuming " + label + "…")}`);
+                } catch (reconnectErr) {
+                  this.elog(pc.red(`${TAB_A}❌ Reconnect failed: ${reconnectErr?.message || reconnectErr}`));
+                  reconnecting = false;
+                  // Re-throw to trigger retry
+                  throw reconnectErr;
+                } finally {
+                  reconnecting = false;
+                }
+              }
+
+              retries++;
+              const retryDelay = 500 * retries;
+              if (this.isVerbose) {
+                this.log(`${TAB_A}${pc.dim(`Retry ${retries}/${maxRetries} for: ${item.rel || ''} (waiting ${retryDelay}ms)`)}`);
+              }
+              // Brief pause before retry
+              await new Promise(r => setTimeout(r, retryDelay));
+              // Retry the same item
+              continue;
+            }
+
+            // Log error and move on
+            this.elog(
+              pc.red(`${TAB_A}⚠️ Error in ${label} (attempt ${retries + 1}/${maxRetries + 1}):`),
+              msg
+            );
+
+            if (retries >= maxRetries) {
+              failedCount++;
+              this.elog(pc.red(`${TAB_A}❌ Failed after ${maxRetries + 1} attempts: ${item.rel || item.remotePath || ''}`));
+            }
+            break; // Exit retry loop
+          }
         }
 
         done += 1;
@@ -373,6 +469,9 @@ export class SftpPushSyncApp {
       workers.push(worker());
     }
     await Promise.all(workers);
+
+    // Return statistics
+    return { total, done, failed: failedCount };
   }
 
   // ---------------------------------------------------------
@@ -409,6 +508,7 @@ export class SftpPushSyncApp {
     if (total === 0) return;
 
     let current = 0;
+    let failedDirs = 0;
 
     for (const relDir of dirs) {
       current += 1;
@@ -422,22 +522,57 @@ export class SftpPushSyncApp {
         "Folders"
       );
 
-      try {
-        const exists = await sftp.exists(remoteDir);
-        if (!exists) {
-          await sftp.mkdir(remoteDir, true);
-          this.dirStats.createdDirs += 1;
-          this.vlog(`${TAB_A}${pc.dim("dir created:")} ${remoteDir}`);
-        } else {
-          this.vlog(`${TAB_A}${pc.dim("dir ok:")} ${remoteDir}`);
+      let retries = 0;
+      const maxRetries = 3;
+      let success = false;
+
+      while (retries <= maxRetries && !success) {
+        try {
+          const exists = await sftp.exists(remoteDir);
+          if (!exists) {
+            await sftp.mkdir(remoteDir, true);
+            this.dirStats.createdDirs += 1;
+            this.vlog(`${TAB_A}${pc.dim("dir created:")} ${remoteDir}`);
+          } else {
+            this.vlog(`${TAB_A}${pc.dim("dir ok:")} ${remoteDir}`);
+          }
+          success = true;
+        } catch (e) {
+          const msg = e?.message || String(e);
+          const isConnectionError =
+            msg.includes("No SFTP connection") ||
+            msg.includes("ECONNRESET") ||
+            msg.includes("ETIMEDOUT") ||
+            msg.includes("connection") ||
+            msg.includes("Channel open failure") ||
+            msg.includes("socket") ||
+            msg.includes("SSH");
+
+          if (isConnectionError && retries < maxRetries) {
+            this.log(`${TAB_A}${pc.yellow("⚠ Connection lost during directory preparation, reconnecting…")}`);
+            try {
+              await this._reconnect(sftp);
+              retries++;
+              await new Promise(r => setTimeout(r, 500 * retries));
+              continue; // Retry this directory
+            } catch (reconnectErr) {
+              this.elog(pc.red(`${TAB_A}❌ Reconnect failed: ${reconnectErr?.message || reconnectErr}`));
+            }
+          }
+
+          this.wlog(
+            pc.yellow("⚠️  Could not ensure directory:"),
+            remoteDir,
+            msg
+          );
+          failedDirs++;
+          break; // Move to next directory
         }
-      } catch (e) {
-        this.wlog(
-          pc.yellow("⚠️  Could not ensure directory:"),
-          remoteDir,
-          e?.message || e
-        );
       }
+    }
+
+    if (failedDirs > 0) {
+      this.wlog(pc.yellow(`⚠️  ${failedDirs} directories could not be created`));
     }
 
     this.updateProgress2("Prepare dirs: ", total, total, "done", "Folders");
@@ -450,7 +585,24 @@ export class SftpPushSyncApp {
   // ---------------------------------------------------------
 
   async cleanupEmptyDirs(sftp, rootDir, dryRun) {
-    const recurse = async (dir) => {
+    // Track reconnect state at cleanup level
+    let reconnectNeeded = false;
+
+    const attemptReconnect = async () => {
+      if (reconnectNeeded) return false; // Already tried
+      reconnectNeeded = true;
+      this.log(`${TAB_A}${pc.yellow("⚠ Connection lost during cleanup, reconnecting…")}`);
+      try {
+        await this._reconnect(sftp);
+        reconnectNeeded = false;
+        return true;
+      } catch (err) {
+        this.elog(pc.red(`${TAB_A}❌ Reconnect during cleanup failed: ${err?.message || err}`));
+        return false;
+      }
+    };
+
+    const recurse = async (dir, depth = 0) => {
       this.dirStats.cleanupVisited += 1;
 
       const relForProgress = toPosix(path.relative(rootDir, dir)) || ".";
@@ -467,16 +619,36 @@ export class SftpPushSyncApp {
       const subdirs = [];
       let items;
 
-      try {
-        items = await sftp.list(dir);
-      } catch (e) {
-        this.wlog(
-          pc.yellow("⚠️  Could not list directory during cleanup:"),
-          dir,
-          e?.message || e
-        );
-        return false;
+      // Try to list directory with reconnect on failure
+      let retries = 0;
+      while (retries <= 2) {
+        try {
+          items = await sftp.list(dir);
+          break;
+        } catch (e) {
+          const msg = e?.message || String(e);
+          const isConnectionError = msg.includes("No SFTP connection") ||
+            msg.includes("ECONNRESET") || msg.includes("connection");
+
+          if (isConnectionError && retries < 2) {
+            const reconnected = await attemptReconnect();
+            if (reconnected) {
+              retries++;
+              await new Promise(r => setTimeout(r, 500));
+              continue;
+            }
+          }
+
+          this.wlog(
+            pc.yellow("⚠️  Could not list directory during cleanup:"),
+            dir,
+            msg
+          );
+          return false;
+        }
       }
+
+      if (!items) return false;
 
       for (const item of items) {
         if (!item.name || item.name === "." || item.name === "..") continue;
@@ -490,7 +662,7 @@ export class SftpPushSyncApp {
       let allSubdirsEmpty = true;
       for (const sub of subdirs) {
         const full = path.posix.join(dir, sub.name);
-        const subEmpty = await recurse(full);
+        const subEmpty = await recurse(full, depth + 1);
         if (!subEmpty) {
           allSubdirsEmpty = false;
         }
@@ -507,17 +679,34 @@ export class SftpPushSyncApp {
           );
           this.dirStats.cleanupDeleted += 1;
         } else {
-          try {
-            await sftp.rmdir(dir, false);
-            this.log(`${TAB_A}${DEL} Removed empty directory: ${rel}`);
-            this.dirStats.cleanupDeleted += 1;
-          } catch (e) {
-            this.wlog(
-              pc.yellow("⚠️  Could not remove directory:"),
-              dir,
-              e?.message || e
-            );
-            return false;
+          let deleteRetries = 0;
+          while (deleteRetries <= 2) {
+            try {
+              await sftp.rmdir(dir, false);
+              this.log(`${TAB_A}${DEL} Removed empty directory: ${rel}`);
+              this.dirStats.cleanupDeleted += 1;
+              break;
+            } catch (e) {
+              const msg = e?.message || String(e);
+              const isConnectionError = msg.includes("No SFTP connection") ||
+                msg.includes("ECONNRESET") || msg.includes("connection");
+
+              if (isConnectionError && deleteRetries < 2) {
+                const reconnected = await attemptReconnect();
+                if (reconnected) {
+                  deleteRetries++;
+                  await new Promise(r => setTimeout(r, 500));
+                  continue;
+                }
+              }
+
+              this.wlog(
+                pc.yellow("⚠️  Could not remove directory:"),
+                dir,
+                msg
+              );
+              return false;
+            }
           }
         }
       }
@@ -544,8 +733,44 @@ export class SftpPushSyncApp {
   // Hauptlauf
   // ---------------------------------------------------------
 
+  /**
+   * Format duration in human-readable format (mm:ss or hh:mm:ss)
+   */
+  _formatDuration(seconds) {
+    const totalSec = Math.floor(seconds);
+    const hours = Math.floor(totalSec / 3600);
+    const minutes = Math.floor((totalSec % 3600) / 60);
+    const secs = totalSec % 60;
+
+    if (hours > 0) {
+      return `${hours}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+    }
+    return `${minutes}:${String(secs).padStart(2, '0')}`;
+  }
+
   async run() {
     const start = Date.now();
+
+    // Global error handlers to catch unexpected errors
+    const handleFatalError = (type, error) => {
+      const msg = error?.message || String(error);
+      const logMsg = `❌ FATAL ${type}: ${msg}`;
+      console.error(pc.red(logMsg));
+      if (this.logger) {
+        this.logger.writeLine(logMsg);
+        this.logger.writeLine(error?.stack || "No stack trace available");
+        this.logger.close();
+      }
+      process.exitCode = 1;
+    };
+
+    process.on('unhandledRejection', (reason) => {
+      handleFatalError('Unhandled Promise Rejection', reason);
+    });
+    process.on('uncaughtException', (error) => {
+      handleFatalError('Uncaught Exception', error);
+    });
+
     const {
       target,
       dryRun = false,
@@ -626,6 +851,9 @@ export class SftpPushSyncApp {
     this.logLevel = logLevel;
     this.isVerbose = logLevel === "verbose";
     this.isLaconic = logLevel === "laconic";
+
+    // Timestamps in Logfile
+    this.logTimestamps = configRaw.logTimestamps ?? false;
 
     // Progress-Konfig
     const PROGRESS = configRaw.progress ?? {};
@@ -716,7 +944,7 @@ export class SftpPushSyncApp {
     const logFile = path.resolve(
       rawLogFilePattern.replace("{target}", target)
     );
-    this.logger = new SyncLogger(logFile);
+    this.logger = new SyncLogger(logFile, { enableTimestamps: this.logTimestamps });
     await this.logger.init();
 
     // Header
@@ -726,7 +954,7 @@ export class SftpPushSyncApp {
         `🔐 SFTP Push-Synchronisation: sftp-push-sync  v${pkg.version}`
       )
     );
-    this.log(`${TAB_A}LogLevel: ${this.logLevel}`);
+    this.log(`${TAB_A}LogLevel: ${this.logLevel}${this.logTimestamps ? " (timestamps enabled)" : ""}`);
     this.log(`${TAB_A}Connection: ${pc.cyan(target)}`);
     this.log(`${TAB_A}Worker: ${this.connection.workers}`);
     this.log(
@@ -781,9 +1009,12 @@ export class SftpPushSyncApp {
         username: this.connection.user,
         password: this.connection.password,
         // Keep-Alive to prevent server disconnection during long operations
-        keepaliveInterval: 10000,  // Send keepalive every 10 seconds
-        keepaliveCountMax: 10,     // Allow up to 10 missed keepalives before disconnect
-        readyTimeout: 30000,       // 30s timeout for initial connection
+        keepaliveInterval: 5000,   // Send keepalive every 5 seconds (more frequent for unstable servers)
+        keepaliveCountMax: 6,      // Allow up to 6 missed keepalives (30s total) before disconnect
+        readyTimeout: 60000,       // 60s timeout for initial connection
+        retries: 2,                // Internal retries
+        retry_factor: 2,
+        retry_minTimeout: 2000,
       });
       connected = true;
 
@@ -818,10 +1049,11 @@ export class SftpPushSyncApp {
           symbols: { ADD, CHA, tab_a: TAB_A },
         });
 
-        const duration = ((Date.now() - start) / 1000).toFixed(2);
+        const durationSec = (Date.now() - start) / 1000;
+        const durationFormatted = this._formatDuration(durationSec);
         this.log("");
         this.log(pc.bold(pc.cyan("📊 Summary (bypass only):")));
-        this.log(`${TAB_A}Duration: ${pc.green(duration + " s")}`);
+        this.log(`${TAB_A}Duration: ${pc.green(durationFormatted)} (${durationSec.toFixed(1)}s)`);
         return;
       }
 
@@ -994,7 +1226,8 @@ export class SftpPushSyncApp {
             }
             await sftp.put(l.localPath, remotePath);
           },
-          "Uploads (new)"
+          "Uploads (new)",
+          sftp
         );
 
         // Updates
@@ -1010,7 +1243,8 @@ export class SftpPushSyncApp {
             }
             await sftp.put(l.localPath, remotePath);
           },
-          "Uploads (update)"
+          "Uploads (update)",
+          sftp
         );
 
         // Deletes
@@ -1028,7 +1262,8 @@ export class SftpPushSyncApp {
               );
             }
           },
-          "Deletes"
+          "Deletes",
+          sftp
         );
       } else {
         this.log("");
@@ -1055,7 +1290,8 @@ export class SftpPushSyncApp {
         await this.cleanupEmptyDirs(sftp, this.connection.remoteRoot, dryRun);
       }
 
-      const duration = ((Date.now() - start) / 1000).toFixed(2);
+      const durationSec = (Date.now() - start) / 1000;
+      const durationFormatted = this._formatDuration(durationSec);
 
       // Save cache and close
       await this.hashCache.save();
@@ -1065,7 +1301,7 @@ export class SftpPushSyncApp {
       this.log(hr1());
       this.log("");
       this.log(pc.bold(pc.cyan("📊 Summary:")));
-      this.log(`${TAB_A}Duration: ${pc.green(duration + " s")}`);
+      this.log(`${TAB_A}Duration: ${pc.green(durationFormatted)} (${durationSec.toFixed(1)}s)`);
       this.log(`${TAB_A}${ADD} Added  : ${toAdd.length}`);
       this.log(`${TAB_A}${CHA} Changed: ${toUpdate.length}`);
       this.log(`${TAB_A}${DEL} Deleted: ${toDelete.length}`);

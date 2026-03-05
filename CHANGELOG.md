@@ -1,12 +1,16 @@
 # Changelog
 
+## [3.0.1] - 2026-03-05
+
+- stability improvements especialy during large and longtime uploads, error handling, log with datetime.
+
 ## [3.0.0] - 2026-03-04
 
 - Switched from JSON-file based hash cache to NDJSON-based Cache-implementation.
 - Disk-based, only active entries in RAM
 - Scales to 100,000+ files without memory issues
 - Auto-persist (no explicit saving required)
-- Auto-migration - Existing JSON cache (.sync-cache.prod.json) is automatically migrated to LevelDB (.sync-cache-prod/)
+- Auto-migration - Existing JSON cache is automatically migrated
 
 ## [2.5.0] - 2026-03-04
 

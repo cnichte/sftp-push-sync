@@ -104,6 +104,7 @@ Create a `sync.config.json` in the root folder of your project:
     "analyzeChunk": 1
   },
   "logLevel": "normal",
+  "logTimestamps": false,
   "logFile": ".sftp-push-sync.{target}.log"
 }
 ```
@@ -204,6 +205,7 @@ sftp-push-sync prod --sidecar-download --skip-sync
 Logging can also be configured.
 
 - `logLevel` - normal, verbose, laconic.
+- `logTimestamps` - true/false. When enabled, each log line is prefixed with a timestamp `[YYYY-MM-DD HH:mm:ss.SSS]`.
 - `logFile` - an optional logFile.
 - `scanChunk` - After how many elements should a log output be generated during scanning?
 - `analyzeChunk` - After how many elements should a log output be generated during analysis?

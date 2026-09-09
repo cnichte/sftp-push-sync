@@ -1,5 +1,9 @@
 # Changelog
 
+## [3.0.4] - 2026-09-09
+
+- compare phase improved with WorkerPool.
+
 ## [3.0.3] - 2026-09-09
 
 - Progress bar improved

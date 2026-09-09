@@ -6,6 +6,8 @@ Implements a push syncronisation with Dry-Run. Performs the following tasks:
 2. Delete remote files that no longer exist locally
 3. Identify changes based on size or altered content and upload them
 
+Reliability was important to me here, so that no orphaned documents are left on the server and only the parts that have changed are actually updated.
+
 Why?
 
 - I use the script to transfer [Hugo websites](https://gohugo.io) to the server.

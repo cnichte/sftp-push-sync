@@ -6,6 +6,7 @@
  */
 // src/core/ScanProgressController.mjs
 import cliSpinners from "cli-spinners";
+import pc from "picocolors";
 import { toPosix, shortenPathForProgress } from "../helpers/directory.mjs";
 
 const SPINNER = cliSpinners.dots;
@@ -20,9 +21,11 @@ export class ScanProgressController {
   constructor({ writeLogLine } = {}) {
     this.writeLogLine = writeLogLine || (() => {});
     this.channels = new Map(); // id -> { label, current, total, lastRel }
+    this.slots = new Map(); // id -> Map<slotIndex, currentPath>
     this.interval = null;
     this.frameIndex = 0;
     this.linesRendered = 0;
+    this.lastRenderAt = 0;
   }
 
   get enabled() {
@@ -43,6 +46,7 @@ export class ScanProgressController {
     this.clear();
     if (this.enabled) process.stdout.write("\x1b[?25h");
     this.channels.clear();
+    this.slots.clear();
   }
 
   clear() {
@@ -80,10 +84,34 @@ export class ScanProgressController {
     this.channels.set(id, data);
     if (!this.enabled) return;
     this.start();
+    this.requestRender();
+  }
+
+  // Meldet Verzeichnis und lokalen Fortschritt eines einzelnen Scan-Workers.
+  updateSlot(id, slotIndex, currentPath, current = 0, total = 0) {
+    if (!this.slots.has(id)) this.slots.set(id, new Map());
+    const channelSlots = this.slots.get(id);
+
+    if (currentPath) {
+      channelSlots.set(slotIndex, { path: currentPath, current, total });
+    } else {
+      channelSlots.delete(slotIndex);
+    }
+
+    if (!this.enabled) return;
+    this.start();
+    this.requestRender(current === 0 || (total > 0 && current >= total));
+  }
+
+  requestRender(force = false) {
+    const now = Date.now();
+    if (!force && now - this.lastRenderAt < 100) return;
+    this.render();
   }
 
   done(id) {
     this.channels.delete(id);
+    this.slots.delete(id);
     if (this.channels.size === 0) {
       this.stop();
     }
@@ -91,6 +119,7 @@ export class ScanProgressController {
 
   render() {
     if (!this.enabled) return;
+    this.lastRenderAt = Date.now();
     this.clear();
 
     const frame = SPINNER.frames[this.frameIndex];
@@ -98,15 +127,40 @@ export class ScanProgressController {
 
     const width = process.stdout.columns || 100;
 
-    const lines = [...this.channels.values()].map((data) => {
+    const clip = (line) => (line.length > width ? line.slice(0, width - 1) : line);
+    const lines = [];
+
+    for (const [id, data] of this.channels) {
       const { label, current, total, lastRel } = data;
       const count = total && total > 0 ? `${current}/${total}` : `${current}`;
-      const hint = lastRel ? shortenPathForProgress(toPosix(lastRel)) : "waiting …";
-      const line = `   ${frame} ${label.padEnd(LABEL_WIDTH)} ${count} Files | ${hint}`;
-      return line.length > width ? line.slice(0, width - 1) : line;
-    });
+      const channelSlots = this.slots.get(id);
+      const hasSlots = Boolean(channelSlots && channelSlots.size > 0);
 
-    process.stdout.write(lines.map((l) => l.padEnd(width)).join("\n"));
+      const summary = hasSlots
+        ? `   ${frame} ${label.padEnd(LABEL_WIDTH)} ${count} Files`
+        : `   ${frame} ${label.padEnd(LABEL_WIDTH)} ${count} Files | ${
+            lastRel ? shortenPathForProgress(toPosix(lastRel)) : "waiting …"
+          }`;
+      lines.push({ text: clip(summary), color: pc.cyan });
+
+      if (!hasSlots) continue;
+
+      for (const slotIndex of [...channelSlots.keys()].sort((a, b) => a - b)) {
+        const slot = channelSlots.get(slotIndex);
+        const hint = shortenPathForProgress(toPosix(slot.path));
+        const localCount = slot.total > 0
+          ? ` | ${slot.current}/${slot.total} entries`
+          : " | listing...";
+        lines.push({
+          text: clip(`     ${String(slotIndex + 1).padStart(2)} | ${hint}${localCount}`),
+          color: pc.dim,
+        });
+      }
+    }
+
+    process.stdout.write(
+      lines.map(({ text, color }) => color(text.padEnd(width))).join("\n")
+    );
     this.linesRendered = lines.length;
   }
 }

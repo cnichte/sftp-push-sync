@@ -116,7 +116,7 @@ export async function walkLocalPlain(root) {
 
 /**
  * Remote-Walker mit INCLUDE/EXCLUDE über filterFn
- * Optimiert: Parallelisierte Verzeichnis-Traversierung
+ * Optimiert: feste Worker-Queue für parallele Verzeichnis-Listings
  */
 export async function walkRemote(
   sftp,
@@ -131,6 +131,7 @@ export async function walkRemote(
 ) {
   const result = new Map();
   let scanned = 0;
+  const workerCount = Math.max(1, Number(concurrency) || 1);
 
   // Verzeichnisbaum (rel -> { parent, fileCount }), damit spätere Cleanup-Läufe
   // die Leerheit von Verzeichnissen ohne erneutes sftp.list() bestimmen können.
@@ -143,40 +144,50 @@ export async function walkRemote(
     }
   }
 
-  // Semaphore für Concurrency-Kontrolle
-  let activeCount = 0;
-  const waiting = [];
+  const queue = [{ remoteDir: remoteRoot, prefix: "" }];
+  let activeWorkers = 0;
+  const wakeWorkers = [];
 
-  async function acquireSemaphore() {
-    if (activeCount < concurrency) {
-      activeCount++;
+  function wakeNextWorker() {
+    const wakeWorker = wakeWorkers.shift();
+    if (wakeWorker) wakeWorker();
+  }
+
+  function enqueue(remoteDir, prefix) {
+    queue.push({ remoteDir, prefix });
+    wakeNextWorker();
+  }
+
+  async function takeNextDirectory() {
+    while (queue.length === 0) {
+      if (activeWorkers === 0) return null;
+      await new Promise((resolve) => {
+        wakeWorkers.push(resolve);
+      });
+    }
+
+    activeWorkers += 1;
+    return queue.shift();
+  }
+
+  function finishDirectory() {
+    activeWorkers -= 1;
+    if (activeWorkers === 0 && queue.length === 0) {
+      while (wakeWorkers.length > 0) wakeNextWorker();
       return;
     }
-    await new Promise((resolve) => waiting.push(resolve));
-    activeCount++;
+    wakeNextWorker();
   }
 
-  function releaseSemaphore() {
-    activeCount--;
-    if (waiting.length > 0) {
-      const next = waiting.shift();
-      next();
-    }
-  }
-
-  async function recurse(remoteDir, prefix) {
-    await acquireSemaphore();
-    let items;
-    try {
-      items = await sftp.list(remoteDir);
-    } finally {
-      releaseSemaphore();
-    }
-
-    const subdirPromises = [];
+  async function processDirectory(remoteDir, prefix, slotIndex) {
+    const items = await sftp.list(remoteDir);
+    let processedEntries = 0;
+    progress?.updateSlot?.("remote", slotIndex, remoteDir, 0, items.length);
 
     for (const item of items) {
       if (!item.name || item.name === "." || item.name === "..") continue;
+
+      processedEntries += 1;
 
       const full = path.posix.join(remoteDir, item.name);
       const rel = prefix ? `${prefix}/${item.name}` : item.name;
@@ -185,8 +196,7 @@ export async function walkRemote(
 
       if (item.type === "d") {
         registerDir(rel, prefix);
-        // Parallele Verarbeitung von Unterverzeichnissen
-        subdirPromises.push(recurse(full, rel));
+        enqueue(full, rel);
       } else {
         result.set(rel, {
           rel,
@@ -212,13 +222,45 @@ export async function walkRemote(
           });
         }
       }
-    }
 
-    // Warte auf alle Unterverzeichnisse parallel
-    await Promise.all(subdirPromises);
+      if (
+        progress &&
+        (processedEntries === 1 ||
+          processedEntries % scanChunk === 0 ||
+          processedEntries === items.length)
+      ) {
+        progress.updateSlot(
+          "remote",
+          slotIndex,
+          remoteDir,
+          processedEntries,
+          items.length
+        );
+      }
+    }
   }
 
-  await recurse(remoteRoot, "");
+  const runWorker = async (slotIndex) => {
+    while (true) {
+      const next = await takeNextDirectory();
+      if (!next) {
+        progress?.updateSlot?.("remote", slotIndex, null);
+        return;
+      }
+
+      progress?.updateSlot?.("remote", slotIndex, next.remoteDir);
+
+      try {
+        await processDirectory(next.remoteDir, next.prefix, slotIndex);
+      } finally {
+        finishDirectory();
+      }
+    }
+  };
+
+  await Promise.all(
+    Array.from({ length: workerCount }, (_, slotIndex) => runWorker(slotIndex))
+  );
 
   if (progress) {
     progress.updateChannel("remote", {

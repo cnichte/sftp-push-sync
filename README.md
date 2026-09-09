@@ -23,6 +23,7 @@ Features:
 - Binary files (images, video, audio, PDF, etc.): SHA-256 hash comparison
 - Hashes are cached in `.sync-cache.*.ndjson`
 - Parallel uploads/deletions via worker pool
+- Parallel remote directory listings via configurable scan worker pool
 - include/exclude patterns
 - Sidecar uploads / downloads - Bypassing the sync process
 
@@ -68,7 +69,8 @@ Create a `sync.config.json` in the root folder of your project:
       "user": "ftpuser",
       "password": "mypassword",
       "syncCache": ".sync-cache.prod.json",
-      "worker": 3,
+      "workerUpload": 3,
+      "workerList": 5,
       "sync": {
         "localRoot": "public",
         "remoteRoot": "/folder/"
@@ -86,7 +88,8 @@ Create a `sync.config.json` in the root folder of your project:
       "user": "ftp_user",
       "password": "total_secret",
       "syncCache": ".sync-cache.staging.json",
-      "worker": 1,
+      "workerUpload": 1,
+      "workerList": 5,
       "sync": {
         "localRoot": "public",
         "remoteRoot": "/web/my-page/"
@@ -175,7 +178,7 @@ There are 7 steps to follow:
 - Phase 6: Apply changes
 - Phase 7: Cleaning up empty remote directories
 
-Phases 1 and 2 can optionally be executed in parallel. Phase 6 always runs in parallel with as many worker threads as the FTP server allows.
+Phases 1 and 2 can optionally be executed in parallel. Phase 2 uses `workerList` parallel remote directory listings. Phase 6 uses `workerUpload` parallel file operations for uploads/deletions. The old `worker` setting is still accepted as a fallback for `workerUpload`.
 
 ### Sidecar uploads / downloads
 
@@ -213,6 +216,8 @@ Logging can also be configured.
 - `logLevel` - normal, verbose, laconic.
 - `logTimestamps` - true/false. When enabled, each log line is prefixed with a timestamp `[YYYY-MM-DD HH:mm:ss.SSS]`.
 - `logFile` - an optional logFile.
+- `workerUpload` - How many upload/delete operations may run in parallel for one connection?
+- `workerList` - How many remote directories may be listed in parallel during Phase 2? Default: 5.
 - `scanChunk` - After how many elements should a log output be generated during scanning?
 - `analyzeChunk` - After how many elements should a log output be generated during analysis?
 

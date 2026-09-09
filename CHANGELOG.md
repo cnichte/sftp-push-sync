@@ -1,5 +1,18 @@
 # Changelog
 
+## [3.0.5] - 2026-09-10
+
+- Scan-Phase 1 + 2 accelerated
+  - The `worker` property is now called `workerUpload`, which describes more precisely what is happening here: it defines the number of parallel workers for the upload.
+  - Similarly, there is now a property for the `FTP.list()` command: `workerList`. This sets the number of parallel `list` calls.
+  
+As each FTP server has different limits on the number of parallel requests it allows, you will need to determine the appropriate values by trial and error. The whole thing is backwards compatible: the `worker` property continues to work as workerUpload.
+
+What does this change achieve? Take 43,048 files, for example:
+
+- 1 Worker Duration: 21:07 (1267.2s)
+- 5 Worker Duration: 9:17 (557.9s)
+
 ## [3.0.4] - 2026-09-09
 
 - compare phase improved with WorkerPool.

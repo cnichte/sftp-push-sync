@@ -987,7 +987,8 @@ export class SftpPushSyncApp {
       remoteRoot: syncCfg.remoteRoot,
       sidecarLocalRoot: path.resolve(sidecarCfg.localRoot ?? syncCfg.localRoot),
       sidecarRemoteRoot: sidecarCfg.remoteRoot ?? syncCfg.remoteRoot,
-      workers: targetConfig.worker ?? 2,
+      workers: targetConfig.workerUpload ?? targetConfig.worker ?? 2,
+      workerList: targetConfig.workerList ?? 5,
     };
 
     // LogLevel
@@ -1102,7 +1103,8 @@ export class SftpPushSyncApp {
     );
     this.log(`${TAB_A}LogLevel: ${this.logLevel}${this.logTimestamps ? " (timestamps enabled)" : ""}`);
     this.log(`${TAB_A}Connection: ${pc.cyan(target)}`);
-    this.log(`${TAB_A}Worker: ${this.connection.workers}`);
+    this.log(`${TAB_A}Worker upload/delete: ${this.connection.workers}`);
+    this.log(`${TAB_A}Worker remote list: ${this.connection.workerList}`);
     this.log(
       `${TAB_A}Host: ${pc.green(this.connection.host)}:${pc.green(
         this.connection.port
@@ -1266,6 +1268,7 @@ export class SftpPushSyncApp {
             progress: scanProgress,
             scanChunk: this.scanChunk,
             log: (msg) => this.log(msg),
+            concurrency: this.connection.workerList,
           }),
         ]);
       } else {
@@ -1284,6 +1287,7 @@ export class SftpPushSyncApp {
           progress: scanProgress,
           scanChunk: this.scanChunk,
           log: (msg) => this.log(msg),
+          concurrency: this.connection.workerList,
         });
       }
 

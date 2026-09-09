@@ -521,7 +521,33 @@ export class SftpPushSyncApp {
     );
   }
 
-  async ensureAllRemoteDirsExist(sftp, remoteRoot, toAdd, toUpdate) {
+  // ---------------------------------------------------------
+  // Remote-Verzeichnisbaum (für Cleanup ohne erneutes Auflisten)
+  // ---------------------------------------------------------
+
+  _ensureDirIndexEntry(dirIndex, relDir) {
+    if (!dirIndex || dirIndex.has(relDir)) return;
+    const parts = relDir ? relDir.split("/") : [];
+    let acc = "";
+    for (const part of parts) {
+      const child = acc ? `${acc}/${part}` : part;
+      if (!dirIndex.has(child)) {
+        dirIndex.set(child, { parent: acc, fileCount: 0 });
+      }
+      acc = child;
+    }
+  }
+
+  _adjustDirFileCount(dirIndex, rel, delta) {
+    if (!dirIndex) return;
+    const parentDir = path.posix.dirname(rel);
+    const dirRel = parentDir === "." ? "" : parentDir;
+    this._ensureDirIndexEntry(dirIndex, dirRel);
+    const node = dirIndex.get(dirRel);
+    if (node) node.fileCount = Math.max(0, node.fileCount + delta);
+  }
+
+  async ensureAllRemoteDirsExist(sftp, remoteRoot, toAdd, toUpdate, dirIndex = null) {
     const dirs = this.collectDirsFromChanges([...toAdd, ...toUpdate]);
     const total = dirs.length;
     this.dirStats.ensuredDirs += total;
@@ -557,6 +583,7 @@ export class SftpPushSyncApp {
           } else {
             this.vlog(`${TAB_A}${pc.dim("dir ok:")} ${remoteDir}`);
           }
+          this._ensureDirIndexEntry(dirIndex, relDir);
           success = true;
         } catch (e) {
           const msg = e?.message || String(e);
@@ -603,7 +630,108 @@ export class SftpPushSyncApp {
   // Cleanup: leere Verzeichnisse löschen
   // ---------------------------------------------------------
 
-  async cleanupEmptyDirs(sftp, rootDir, dryRun) {
+  /**
+   * Löscht leere Remote-Verzeichnisse.
+   * Nutzt bevorzugt den während des Scans mitgeführten remoteDirIndex, um die
+   * Leerheit rein im Speicher zu bestimmen (kein erneutes sftp.list() je Ordner).
+   * Ohne Index (z.B. Sonderfälle) wird auf das alte listenbasierte Verfahren zurückgefallen.
+   */
+  async cleanupEmptyDirs(sftp, rootDir, dryRun, dirIndex = null) {
+    if (!dirIndex || dirIndex.size === 0) {
+      return this._cleanupEmptyDirsByListing(sftp, rootDir, dryRun);
+    }
+
+    const attemptReconnect = async () => {
+      this.log(`${TAB_A}${pc.yellow("⚠ Connection lost during cleanup, reconnecting…")}`);
+      try {
+        await this._reconnect(sftp);
+        return true;
+      } catch (err) {
+        this.elog(pc.red(`${TAB_A}❌ Reconnect during cleanup failed: ${err?.message || err}`));
+        return false;
+      }
+    };
+
+    // Kind-Zuordnung aus den Parent-Links rekonstruieren (kein SFTP-Call nötig)
+    const children = new Map();
+    for (const [rel, node] of dirIndex) {
+      if (node.parent === null) continue;
+      if (!children.has(node.parent)) children.set(node.parent, []);
+      children.get(node.parent).push(rel);
+    }
+
+    this.dirStats.cleanupVisited += dirIndex.size;
+
+    // Post-order: Kinder landen vor ihren Eltern in der Liste (wichtig für Löschreihenfolge)
+    const emptyDirs = [];
+    const computeEmpty = (rel) => {
+      const node = dirIndex.get(rel);
+      const kids = children.get(rel) || [];
+      let allKidsEmpty = true;
+      for (const child of kids) {
+        if (!computeEmpty(child)) allKidsEmpty = false;
+      }
+      const isEmpty = (node?.fileCount || 0) === 0 && allKidsEmpty;
+      if (isEmpty && (rel !== "" || this.cleanupEmptyRoots)) {
+        emptyDirs.push(rel);
+      }
+      return isEmpty;
+    };
+    computeEmpty("");
+
+    const total = emptyDirs.length;
+    let current = 0;
+
+    for (const relDir of emptyDirs) {
+      current += 1;
+      const dir = relDir ? path.posix.join(rootDir, relDir) : rootDir;
+      const label = relDir || ".";
+
+      this.updateProgress2("Cleanup dirs: ", current, total, label, "Folders");
+
+      if (dryRun) {
+        this.log(`${TAB_A}${DEL} (DRY-RUN) Remove empty directory: ${label}`);
+        this.dirStats.cleanupDeleted += 1;
+        continue;
+      }
+
+      let deleteRetries = 0;
+      while (deleteRetries <= 2) {
+        try {
+          await sftp.rmdir(dir, false);
+          this.log(`${TAB_A}${DEL} Removed empty directory: ${label}`);
+          this.dirStats.cleanupDeleted += 1;
+          break;
+        } catch (e) {
+          const msg = e?.message || String(e);
+          const isConnectionError = msg.includes("No SFTP connection") ||
+            msg.includes("ECONNRESET") || msg.includes("connection");
+
+          if (isConnectionError && deleteRetries < 2) {
+            const reconnected = await attemptReconnect();
+            if (reconnected) {
+              deleteRetries++;
+              await new Promise(r => setTimeout(r, 500));
+              continue;
+            }
+          }
+
+          this.wlog(pc.yellow("⚠️  Could not remove directory:"), dir, msg);
+          break;
+        }
+      }
+    }
+
+    if (total > 0) {
+      this.updateProgress2("Cleanup dirs: ", total, total, "done", "Folders");
+    }
+  }
+
+  /**
+   * Fallback: rekursives Auflisten + Löschen leerer Verzeichnisse via SFTP.
+   * Wird nur genutzt, wenn kein remoteDirIndex aus dem Scan vorliegt.
+   */
+  async _cleanupEmptyDirsByListing(sftp, rootDir, dryRun) {
     // Track reconnect state at cleanup level
     let reconnectNeeded = false;
 
@@ -1014,6 +1142,33 @@ export class SftpPushSyncApp {
     const sftp = new SftpClient();
     let connected = false;
 
+    // Graceful shutdown on SIGINT/SIGTERM (e.g. Ctrl+C or a debugger detaching
+    // and killing the process): save the hash cache and close the SFTP
+    // connection instead of dying mid-flight and losing progress/leaving the
+    // connection open.
+    let shuttingDown = false;
+    const handleShutdownSignal = async (signal) => {
+      if (shuttingDown) return;
+      shuttingDown = true;
+      this.log("");
+      this.wlog(pc.yellow(`⚠ Received ${signal}, shutting down gracefully…`));
+      try {
+        if (this.hashCache?.save) await this.hashCache.save();
+        if (this.hashCache?.close) await this.hashCache.close();
+      } catch (e) {
+        this.vlog(`${TAB_A}${pc.dim(`Cache save/close during shutdown failed: ${e?.message || e}`)}`);
+      }
+      try {
+        if (connected) await sftp.end();
+      } catch (e) {
+        this.vlog(`${TAB_A}${pc.dim(`SFTP close during shutdown failed: ${e?.message || e}`)}`);
+      }
+      if (this.logger) this.logger.close();
+      process.exit(130);
+    };
+    process.once("SIGINT", handleShutdownSignal);
+    process.once("SIGTERM", handleShutdownSignal);
+
     let toAdd = [];
     let toUpdate = [];
     let toDelete = [];
@@ -1092,10 +1247,10 @@ export class SftpPushSyncApp {
       });
 
       let local;
-      let remote;
+      let remoteScan;
 
       if (this.parallelScan) {
-        [local, remote] = await Promise.all([
+        [local, remoteScan] = await Promise.all([
           walkLocal(this.connection.localRoot, {
             filterFn: (rel) => this.isIncluded(rel),
             classifyFn: (rel) => ({
@@ -1124,13 +1279,18 @@ export class SftpPushSyncApp {
           scanChunk: this.scanChunk,
           log: (msg) => this.log(msg),
         });
-        remote = await walkRemote(sftp, this.connection.remoteRoot, {
+        remoteScan = await walkRemote(sftp, this.connection.remoteRoot, {
           filterFn: (rel) => this.isIncluded(rel),
           progress: scanProgress,
           scanChunk: this.scanChunk,
           log: (msg) => this.log(msg),
         });
       }
+
+      const remote = remoteScan.files;
+      // Verzeichnisbaum aus dem Remote-Scan – wird bei Uploads/Deletes live
+      // nachgeführt, damit das Cleanup am Ende ohne erneutes Auflisten auskommt.
+      const remoteDirIndex = remoteScan.dirIndex;
 
       scanProgress.stop();
 
@@ -1167,13 +1327,8 @@ export class SftpPushSyncApp {
               this.updateProgress2(prefix, current, total, rel, "Files");
             },
             updateBatchProgress: ({ current, total, jobs, force = false }) => {
-              const percent = total > 0 ? ((current / total) * 100).toFixed(1) : "0.0";
               if (force) this._clearProgressLine();
-              this.batchProgress.render({
-                title: `Analyse (hash): ${current}/${total} Files (${percent}%)`,
-                jobs,
-                force,
-              });
+              this.batchProgress.render({ current, total, jobs, force });
             },
             log: this.isVerbose ? (...m) => this.log(...m) : null,
           });
@@ -1251,7 +1406,8 @@ export class SftpPushSyncApp {
           sftp,
           this.connection.remoteRoot,
           toAdd,
-          toUpdate
+          toUpdate,
+          remoteDirIndex
         );
       }
 
@@ -1278,6 +1434,7 @@ export class SftpPushSyncApp {
               // Directory may already exist
             }
             await this._uploadFile(sftp, l.localPath, remotePath, rel, l.size);
+            this._adjustDirFileCount(remoteDirIndex, rel, +1);
           },
           "Uploads (new)",
           sftp
@@ -1307,6 +1464,7 @@ export class SftpPushSyncApp {
           async ({ remotePath, rel }) => {
             try {
               await sftp.delete(remotePath);
+              this._adjustDirFileCount(remoteDirIndex, rel, -1);
             } catch (e) {
               this.elog(
                 pc.red("   ⚠️ Error during deletion:"),
@@ -1340,7 +1498,7 @@ export class SftpPushSyncApp {
           await this._reconnect(sftp);
         }
 
-        await this.cleanupEmptyDirs(sftp, this.connection.remoteRoot, dryRun);
+        await this.cleanupEmptyDirs(sftp, this.connection.remoteRoot, dryRun, remoteDirIndex);
       }
 
       const durationSec = (Date.now() - start) / 1000;
@@ -1416,6 +1574,9 @@ export class SftpPushSyncApp {
         }
       }
     } finally {
+      process.removeListener("SIGINT", handleShutdownSignal);
+      process.removeListener("SIGTERM", handleShutdownSignal);
+
       try {
         if (connected) {
           await sftp.end();

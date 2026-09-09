@@ -1,7 +1,7 @@
 {
   "name": "sftp-push-sync",
   "version": "3.0.2",
-  "description": "SFTP sync tool for Hugo projects (local to remote, with hash cache)",
+  "description": "SFTP sync tool for my Hugo projects (local to remote, with hash cache)",
   "type": "module",
   "bin": {
     "sftp-push-sync": "bin/sftp-push-sync.mjs"
@@ -24,6 +24,7 @@
   "license": "GPL-3.0-or-later",
   "dependencies": {
     "cli-progress": "^3.12.0",
+    "cli-spinners": "^3.4.0",
     "diff": "^8.0.2",
     "minimatch": "^10.1.1",
     "picocolors": "^1.1.1",

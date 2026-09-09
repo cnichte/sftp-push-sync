@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.0.3] - 2026-09-09
+
+- Progress bar improved
+- Phases in the hash comparison bar
+- Speeding up the clean-up of orphaned folders
+- Every now and then, an upload would be terminated with ^c at the start of Phase 1 because VS Code was interfering – this has now (hopefully) been fixed.
+
 ## [3.0.2] - 2026-03-05
 
 - stability improvements especialy during large and longtime uploads, error handling, log with datetime.

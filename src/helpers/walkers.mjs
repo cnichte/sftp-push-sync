@@ -132,6 +132,17 @@ export async function walkRemote(
   const result = new Map();
   let scanned = 0;
 
+  // Verzeichnisbaum (rel -> { parent, fileCount }), damit spätere Cleanup-Läufe
+  // die Leerheit von Verzeichnissen ohne erneutes sftp.list() bestimmen können.
+  const dirIndex = new Map();
+  dirIndex.set("", { parent: null, fileCount: 0 });
+
+  function registerDir(rel, parentRel) {
+    if (!dirIndex.has(rel)) {
+      dirIndex.set(rel, { parent: parentRel, fileCount: 0 });
+    }
+  }
+
   // Semaphore für Concurrency-Kontrolle
   let activeCount = 0;
   const waiting = [];
@@ -173,6 +184,7 @@ export async function walkRemote(
       if (filterFn && !filterFn(rel)) continue;
 
       if (item.type === "d") {
+        registerDir(rel, prefix);
         // Parallele Verarbeitung von Unterverzeichnissen
         subdirPromises.push(recurse(full, rel));
       } else {
@@ -182,6 +194,9 @@ export async function walkRemote(
           size: Number(item.size),
           modifyTime: item.modifyTime ?? 0,
         });
+
+        const parentNode = dirIndex.get(prefix);
+        if (parentNode) parentNode.fileCount += 1;
 
         scanned += 1;
 
@@ -219,7 +234,7 @@ export async function walkRemote(
     log(`   Scan remote: ${scanned} Files`);
   }
 
-  return result;
+  return { files: result, dirIndex };
 }
 
 /**

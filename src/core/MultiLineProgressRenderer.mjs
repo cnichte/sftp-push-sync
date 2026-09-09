@@ -1,4 +1,5 @@
 import cliProgress from "cli-progress";
+import pc from "picocolors";
 import { shortenPathForProgress } from "../helpers/directory.mjs";
 
 const STATUS_LABEL = {
@@ -41,9 +42,11 @@ export class MultiLineProgressRenderer {
         forceRedraw: true,
         autopadding: true,
       },
-      cliProgress.Presets.shades_grey
+      cliProgress.Presets.rect
     );
-    this.headerBar = this.multibar.create(1, 1, { info: "" }, { format: " {info}" });
+    this.headerBar = this.multibar.create(1, 0, { phases: "" }, {
+      format: pc.bold(pc.cyan(" {bar} {percentage}% | {value}/{total} Files | {phases}")),
+    });
   }
 
   stop() {
@@ -61,11 +64,14 @@ export class MultiLineProgressRenderer {
     this.stop();
   }
 
-  render({ title, jobs = [], force = false }) {
+  render({ current = 0, total = 0, jobs = [], force = false }) {
     if (!this.enabled) return;
     this.start();
 
-    this.headerBar.update(1, { info: title });
+    this.headerBar.setTotal(total || 1);
+    this.headerBar.update(Math.min(current, total || 1), {
+      phases: this.formatPhaseSummary(jobs),
+    });
 
     const visibleJobs = jobs.slice(0, this.maxLines);
     const visibleRels = new Set(visibleJobs.map((job) => job.rel));
@@ -95,12 +101,27 @@ export class MultiLineProgressRenderer {
     }
   }
 
+  // Zählt, wie viele Jobs sich gerade in welcher Phase befinden
+  // (queued/local/remote/text/done/changed/error), damit der Kopf-Balken
+  // den aktuellen Batch aufgeschlüsselt zeigt statt nur eine Gesamtzahl.
+  formatPhaseSummary(jobs) {
+    const counts = new Map();
+    for (const job of jobs) {
+      const label = STATUS_LABEL[job.status] || job.status || "work";
+      counts.set(label, (counts.get(label) || 0) + 1);
+    }
+    return [...counts.entries()]
+      .map(([label, count]) => `${label}:${count}`)
+      .join(" ");
+  }
+
   formatJobInfo(job) {
     const status = STATUS_LABEL[job.status] || job.status || "work";
     const rel = shortenPathForProgress(job.rel || "");
     const progress = job.totalBytes
       ? `${formatBytes(job.receivedBytes || 0)}/${formatBytes(job.totalBytes)}`
       : "";
-    return `[${status.padEnd(7)}] ${rel}${progress ? "  " + progress : ""}`;
+    const largeTag = job.isLarge ? "⚡" : "";
+    return `[${status.padEnd(7)}] ${largeTag}${rel}${progress ? "  " + progress : ""}`;
   }
 }

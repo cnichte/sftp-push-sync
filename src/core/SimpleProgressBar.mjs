@@ -46,7 +46,7 @@ export class SimpleProgressBar {
             ? `   ${label}|{bar}| {percentage}% | {value}/{total} ${suffix} | {rel}`
             : `   ${label}{value} ${suffix} | {rel}`,
         },
-        cliProgress.Presets.shades_classic
+        cliProgress.Presets.rect
       );
       this.bar.start(hasTotal ? total : Math.max(current, 1), 0, {
         rel: shortenPathForProgress(rel),

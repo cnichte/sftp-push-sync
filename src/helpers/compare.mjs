@@ -8,19 +8,16 @@
 import fsp from "fs/promises";
 import path from "path";
 
-function formatBytes(bytes) {
-  const mb = bytes / (1024 * 1024);
-  return `${mb.toFixed(1)} MB`;
-}
-
-function createBatchJobs(batch, local) {
+function createBatchJobs(batch, local, maxSizeForHash = Infinity) {
   return batch.map((rel) => {
     const meta = local.get(rel);
+    const size = meta?.size || 0;
     return {
       rel,
       status: "queued",
       receivedBytes: 0,
-      totalBytes: meta?.size || 0,
+      totalBytes: size,
+      isLarge: size >= maxSizeForHash,
     };
   });
 }
@@ -127,7 +124,7 @@ export async function analyseDifferences({
 
   for (let i = 0; i < totalContentCompare; i += concurrency) {
     const batch = keysNeedContentCompare.slice(i, i + concurrency);
-    const batchJobs = createBatchJobs(batch, local);
+    const batchJobs = createBatchJobs(batch, local, maxSizeForHash);
     const batchJobByRel = new Map(batchJobs.map((job) => [job.rel, job]));
 
     const renderBatch = (force = false) => {
@@ -184,10 +181,6 @@ export async function analyseDifferences({
                 renderBatch(true);
               }
               return { rel, local: l, remote: r, remotePath, changed: true };
-            }
-
-            if (log && l.size >= maxSizeForHash) {
-              log(`   → Large binary compare (${formatBytes(l.size)}): ${rel}`);
             }
 
             if (job) {

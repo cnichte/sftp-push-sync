@@ -281,7 +281,7 @@ You can safely delete the local cache at any time. The first analysis will then 
 
 ## Example Output
 
-Bitte warten, das gif braucht ein paar sekunden bis es geladen ist...
+Please wait – the GIF will take a few seconds to load...
 
 ![An console output example](https://github.com/cnichte/sftp-push-sync/blob/main/images/sftp-push-sync-run-example.gif)
 

@@ -30,7 +30,7 @@ The file `sftp-push-sync.mjs` is pure JavaScript (ESM). Node.js can execute it d
 
 ## News
 
-- I’ve improved the loading-bar and made a lot of stability & performance improvements in the lates Updates, [see also](CHANGELOG.md).
+- I’ve improved the loading-bar and made a lot of stability & performance improvements in the lates Updates, [see also CHANGELOG.md](CHANGELOG.md).
 
 ### Breaking changes in 3.0.0
 

@@ -5,8 +5,46 @@
  *
  */
 // src/helpers/compare.mjs
+import fs from "fs";
 import fsp from "fs/promises";
 import path from "path";
+import { Writable } from "stream";
+
+// Liest eine lokale Datei komplett ein, meldet aber Zwischenstände statt nur das Endergebnis.
+function readLocalFileWithProgress(filePath, size, onProgress) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let received = 0;
+    const stream = fs.createReadStream(filePath);
+    stream.on("error", reject);
+    stream.on("data", (chunk) => {
+      chunks.push(chunk);
+      received += chunk.length;
+      if (onProgress) onProgress(received, size || received);
+    });
+    stream.on("end", () => resolve(Buffer.concat(chunks)));
+  });
+}
+
+// Analoges Pendant für den Remote-Download via ssh2-sftp-client.
+function readRemoteFileWithProgress(sftp, remotePath, size, onProgress) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let received = 0;
+    const writable = new Writable({
+      write(chunk, enc, cb) {
+        chunks.push(chunk);
+        received += chunk.length;
+        if (onProgress) onProgress(received, size || received);
+        cb();
+      },
+    });
+    sftp
+      .get(remotePath, writable)
+      .then(() => resolve(Buffer.concat(chunks)))
+      .catch(reject);
+  });
+}
 
 function createBatchJobs(batch, local, maxSizeForHash = Infinity) {
   return batch.map((rel) => {
@@ -152,10 +190,27 @@ export async function analyseDifferences({
               job.status = "text";
               renderBatch(true);
             }
-            // Text-Datei: vollständiger inhaltlicher Vergleich
+            // Text-Datei: vollständiger inhaltlicher Vergleich, mit kombiniertem
+            // Byte-Fortschritt aus lokalem Read + Remote-Download (statt 0→100 Sprung)
+            let localReceived = 0;
+            let remoteReceived = 0;
+            const combinedTotal = (l.size || 0) + (r.size || l.size || 0) || 1;
+            const updateCombined = () => {
+              if (!job) return;
+              job.receivedBytes = localReceived + remoteReceived;
+              job.totalBytes = combinedTotal;
+              renderBatch();
+            };
+
             const [localBuf, remoteBuf] = await Promise.all([
-              fsp.readFile(l.localPath),
-              sftp.get(r.remotePath),
+              readLocalFileWithProgress(l.localPath, l.size, (received) => {
+                localReceived = received;
+                updateCombined();
+              }),
+              readRemoteFileWithProgress(sftp, r.remotePath, r.size || l.size, (received) => {
+                remoteReceived = received;
+                updateCombined();
+              }),
             ]);
 
             const localStr = localBuf.toString("utf8");

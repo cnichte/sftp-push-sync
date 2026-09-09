@@ -2,7 +2,7 @@
  * progress-constants.mjs
  * Central constants for progress and output formatting.
  * 
- * @author Carsten Nichte, 2025 / https://carsten-nichte.de/
+ * @author Carsten Nichte, 2025, https://carsten-nichte.de/
  * 
  */ 
 // src/helpers/progress-constants.mjs

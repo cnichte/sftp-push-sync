@@ -4,7 +4,7 @@
  * LevelDB-based hash cache for efficient storage of large file sets.
  * Unlike the JSON-based cache, this scales to 100k+ files without memory issues.
  *
- * @author Carsten Nichte, 2025 / https://carsten-nichte.de/
+ * @author Carsten Nichte, 2025, https://carsten-nichte.de/
  */
 import { Level } from "level";
 import fs from "fs";

@@ -1,3 +1,12 @@
+/**
+ * MultiLineProgressRenderer.mjs
+ *
+ * Multi-line cli-progress bar for parallel per-file jobs
+ * (hash comparison, uploads/downloads, etc.).
+ *
+ * @author Carsten Nichte, 2025, https://carsten-nichte.de/
+ *
+ */
 import cliProgress from "cli-progress";
 import pc from "picocolors";
 import { shortenPathForProgress } from "../helpers/directory.mjs";

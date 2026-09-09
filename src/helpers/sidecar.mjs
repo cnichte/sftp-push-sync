@@ -1,7 +1,7 @@
 /**
  * sidecar.mjs
  * 
- * @author Carsten Nichte, 2025 / https://carsten-nichte.de/
+ * @author Carsten Nichte, 2025, https://carsten-nichte.de/
  * 
  */ 
 // src/helpers/sidecar.mjs

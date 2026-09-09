@@ -11,7 +11,7 @@
  *
  * Where: t=type (l=local, r=remote), p=path, s=size, m=mtime, h=hash
  *
- * @author Carsten Nichte, 2025 / https://carsten-nichte.de/
+ * @author Carsten Nichte, 2025, https://carsten-nichte.de/
  */
 import fs from "fs";
 import fsp from "fs/promises";

@@ -4,7 +4,7 @@
  * Single-line cli-progress bar for sequential task loops
  * (uploads/downloads, directory preparation, cleanup scans).
  *
- * @author Carsten Nichte, 2025 / https://carsten-nichte.de/
+ * @author Carsten Nichte, 2025, https://carsten-nichte.de/
  *
  */
 // src/core/SimpleProgressBar.mjs

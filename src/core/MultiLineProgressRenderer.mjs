@@ -7,6 +7,7 @@
  * @author Carsten Nichte, 2025, https://carsten-nichte.de/
  *
  */
+// src/core/MultiLineProgressRenderer.mjs
 import cliProgress from "cli-progress";
 import pc from "picocolors";
 import { shortenPathForProgress } from "../helpers/directory.mjs";

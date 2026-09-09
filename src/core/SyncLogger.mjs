@@ -9,7 +9,7 @@ import fsp from "fs/promises";
 import path from "path";
 
 /**
- * Very small logger: schreibt alles in eine Logdatei
+ * Very small logger: Schreibt alles in eine Logdatei
  * und entfernt ANSI-Farbcodes.
  */
 export class SyncLogger {

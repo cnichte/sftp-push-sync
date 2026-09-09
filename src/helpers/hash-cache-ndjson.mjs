@@ -13,6 +13,7 @@
  *
  * @author Carsten Nichte, 2025, https://carsten-nichte.de/
  */
+// src/helpers/hash-cache-ndjson.mjs
 import fs from "fs";
 import fsp from "fs/promises";
 import { createHash } from "crypto";

@@ -3,11 +3,11 @@ import pc from "picocolors";
 import { shortenPathForProgress } from "../helpers/directory.mjs";
 
 const STATUS_LABEL = {
-  queued: "wait",
-  local: "local",
-  remote: "remote",
-  text: "text",
-  done: "done",
+  queued: "waiting",
+  local: "Hash local",
+  remote: "Hash remote",
+  text: "Text compare",
+  done: "identical",
   changed: "changed",
   error: "error",
 };
@@ -122,6 +122,6 @@ export class MultiLineProgressRenderer {
       ? `${formatBytes(job.receivedBytes || 0)}/${formatBytes(job.totalBytes)}`
       : "";
     const largeTag = job.isLarge ? "⚡" : "";
-    return `[${status.padEnd(7)}] ${largeTag}${rel}${progress ? "  " + progress : ""}`;
+    return `[${status.padEnd(13)}] ${largeTag}${rel}${progress ? "  " + progress : ""}`;
   }
 }

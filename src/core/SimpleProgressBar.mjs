@@ -15,6 +15,7 @@ export class SimpleProgressBar {
   constructor() {
     this.bar = null;
     this.label = null;
+    this.startedAt = 0;
   }
 
   get enabled() {
@@ -43,17 +44,26 @@ export class SimpleProgressBar {
           clearOnComplete: true,
           forceRedraw: true,
           format: hasTotal
-            ? `   ${label}|{bar}| {percentage}% | {value}/{total} ${suffix} | {rel}`
-            : `   ${label}{value} ${suffix} | {rel}`,
+            ? `   ${label}|{bar}| {percentage}% | {value}/{total} ${suffix} | ETA {eta_formatted} | {speed} ${suffix}/s | {state} | {rel}`
+            : `   ${label}{value} ${suffix} | {speed} ${suffix}/s | {state} | {rel}`,
         },
         cliProgress.Presets.rect
       );
+      this.startedAt = Date.now();
       this.bar.start(hasTotal ? total : Math.max(current, 1), 0, {
         rel: shortenPathForProgress(rel),
+        speed: "0.0",
+        state: "starting",
       });
     }
 
-    this.bar.update(current, { rel: shortenPathForProgress(rel) });
+    const elapsedSec = Math.max((Date.now() - this.startedAt) / 1000, 0.001);
+    const speed = current / elapsedSec;
+    this.bar.update(current, {
+      rel: shortenPathForProgress(rel),
+      speed: speed.toFixed(1),
+      state: elapsedSec >= 3 && current > 0 && speed < 0.5 ? "slow but steady" : "active",
+    });
 
     if (isDone) this.stop();
   }
@@ -63,6 +73,7 @@ export class SimpleProgressBar {
       this.bar.stop();
       this.bar = null;
       this.label = null;
+      this.startedAt = 0;
     }
   }
 }

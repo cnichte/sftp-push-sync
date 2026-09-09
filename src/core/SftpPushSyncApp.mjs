@@ -17,6 +17,7 @@ import { SyncLogger } from "./SyncLogger.mjs";
 import { ScanProgressController } from "./ScanProgressController.mjs";
 import { MultiLineProgressRenderer } from "./MultiLineProgressRenderer.mjs";
 import { SimpleProgressBar } from "./SimpleProgressBar.mjs";
+import { ProgressMetrics } from "./ProgressMetrics.mjs";
 
 import { toPosix, shortenPathForProgress } from "../helpers/directory.mjs";
 import { createHashCacheNDJSON, migrateFromJsonCache } from "../helpers/hash-cache-ndjson.mjs";
@@ -126,6 +127,7 @@ export class SftpPushSyncApp {
 
     this.progressBar = new SimpleProgressBar();
     this.batchProgress = new MultiLineProgressRenderer({ maxLines: 10 });
+    this.progressMetrics = new ProgressMetrics();
 
     // Cleanup
     this.cleanupEmptyDirsEnabled = true;
@@ -139,6 +141,9 @@ export class SftpPushSyncApp {
 
     // Cache
     this.hashCache = null;
+    this.recoveryPath = null;
+    this.recoveryState = null;
+    this.recoveryWriteQueue = Promise.resolve();
   }
 
   // ---------------------------------------------------------
@@ -375,6 +380,127 @@ export class SftpPushSyncApp {
     this.progressBar.update(prefix, current, total, rel, suffix);
   }
 
+  _formatPhaseMetric(metric) {
+    if (!metric) return "";
+    const rate = metric.filesPerSecond < 0.1
+      ? "<0.1 files/s"
+      : `${metric.filesPerSecond.toFixed(1)} files/s`;
+    const throughput = metric.bytes > 0
+      ? `, ${metric.megabytesPerSecond.toFixed(1)} MB/s`
+      : "";
+    return `${metric.durationSec.toFixed(1)}s, ${rate}${throughput}`;
+  }
+
+  _formatBytes(bytes = 0) {
+    const value = Number(bytes) || 0;
+    if (value < 1024) return `${value} B`;
+    if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+    if (value < 1024 * 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`;
+    return `${(value / 1024 / 1024 / 1024).toFixed(2)} GB`;
+  }
+
+  _getWorkloadCategory({ toAdd = [], toUpdate = [], toDelete = [] } = {}) {
+    const changes = toAdd.length + toUpdate.length + toDelete.length;
+    if (changes === 0) return "no changes";
+
+    const transferItems = [...toAdd, ...toUpdate];
+    const hasLargeFile = transferItems.some(
+      (item) => Number(item.local?.size || 0) >= 50 * 1024 * 1024
+    );
+    if (hasLargeFile) return "large binary changes";
+    if (toUpdate.length >= 100 || changes >= 250) return "many comparisons";
+    return "small changes";
+  }
+
+  _getWorkloadEstimate({
+    toAdd = [],
+    toUpdate = [],
+    toDelete = [],
+    uploadBytes = 0,
+    workers = 1,
+  } = {}) {
+    const changes = toAdd.length + toUpdate.length + toDelete.length;
+    if (changes === 0) {
+      return { minSec: 0, maxSec: 0, risk: "none" };
+    }
+
+    const parallelism = Math.max(1, Number(workers) || 1);
+    const uploadMB = (Number(uploadBytes) || 0) / 1024 / 1024;
+    const minSec = Math.max(
+      1,
+      uploadMB / (parallelism * 8) + changes / (parallelism * 20)
+    );
+    const maxSec = Math.max(
+      minSec,
+      uploadMB / (parallelism * 1.5) + changes / (parallelism * 3)
+    );
+    const risk = uploadMB >= 500 || changes >= 100
+      ? "higher: server latency or large files may dominate"
+      : "normal: depends on server latency";
+
+    return { minSec, maxSec, risk };
+  }
+
+  _formatEstimate(seconds) {
+    if (seconds < 60) return `${seconds.toFixed(0)}s`;
+    return `${(seconds / 60).toFixed(1)}min`;
+  }
+
+  async _loadRecoveryState() {
+    if (!this.recoveryPath) return null;
+    try {
+      const content = await fsp.readFile(this.recoveryPath, "utf8");
+      this.recoveryState = JSON.parse(content);
+      return this.recoveryState;
+    } catch {
+      this.recoveryState = null;
+      return null;
+    }
+  }
+
+  async _writeRecoveryState(status, phase, extra = {}) {
+    if (!this.recoveryPath) return;
+    const write = async () => {
+      this.recoveryState = {
+        version: 1,
+        target: this.options.target,
+        status,
+        phase,
+        updatedAt: new Date().toISOString(),
+        ...extra,
+      };
+      const tempPath = `${this.recoveryPath}.tmp`;
+      await fsp.writeFile(tempPath, `${JSON.stringify(this.recoveryState, null, 2)}\n`, "utf8");
+      await fsp.rename(tempPath, this.recoveryPath);
+    };
+    this.recoveryWriteQueue = this.recoveryWriteQueue.then(write, write);
+    return this.recoveryWriteQueue;
+  }
+
+  async _clearRecoveryState() {
+    if (!this.recoveryPath) return;
+    await this.recoveryWriteQueue;
+    try {
+      await fsp.unlink(this.recoveryPath);
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+    this.recoveryState = null;
+  }
+
+  _logPhaseMetrics() {
+    const metrics = [...this.progressMetrics.phases.keys()]
+      .map((name) => this.progressMetrics.get(name))
+      .filter((metric) => metric?.complete);
+    if (metrics.length === 0) return;
+
+    this.log("");
+    this.log(pc.bold("Performance:"));
+    for (const metric of metrics) {
+      this.log(`${TAB_A}${metric.name}: ${this._formatPhaseMetric(metric)}`);
+    }
+  }
+
   // ---------------------------------------------------------
   // Worker-Pool with auto-reconnect
   // ---------------------------------------------------------
@@ -386,8 +512,16 @@ export class SftpPushSyncApp {
     let done = 0;
     let index = 0;
     let failedCount = 0;
+    let completedBytes = 0;
     const workers = [];
     const actualWorkers = Math.max(1, Math.min(workerCount, total));
+    const metricName = label.toLowerCase();
+    await this._writeRecoveryState("running", "apply changes", {
+      task: label,
+      completed: 0,
+      total,
+    });
+    this.progressMetrics.start(metricName);
 
     // Mutex for reconnection (only one worker reconnects at a time)
     let reconnecting = false;
@@ -480,6 +614,19 @@ export class SftpPushSyncApp {
         }
 
         done += 1;
+        completedBytes += Number(item?.local?.size || item?.size || 0);
+        this.progressMetrics.update(metricName, {
+          files: done,
+          bytes: completedBytes,
+        });
+        if (done === 1 || done % 10 === 0 || done === total) {
+          await this._writeRecoveryState("running", "apply changes", {
+            task: label,
+            completed: done,
+            total,
+            failed: failedCount,
+          });
+        }
         if (done === 1 || done % 10 === 0 || done === total) {
           this.updateProgress2(`${label}: `, done, total, item.rel ?? "");
         }
@@ -490,6 +637,10 @@ export class SftpPushSyncApp {
       workers.push(worker());
     }
     await Promise.all(workers);
+    this.progressMetrics.finish(metricName, {
+      files: done,
+      bytes: completedBytes,
+    });
 
     // Return statistics
     return { total, done, failed: failedCount };
@@ -922,6 +1073,7 @@ export class SftpPushSyncApp {
       runUploadList = false,
       runDownloadList = false,
       skipSync = false,
+      sizeOnly = false,
       cliLogLevel = null,
       configPath,
     } = this.options;
@@ -1072,6 +1224,7 @@ export class SftpPushSyncApp {
     const oldJsonCacheName = targetConfig.syncCache || `.sync-cache.${target}.json`;
     const oldJsonCachePath = path.resolve(oldJsonCacheName);
     const ndjsonCachePath = path.resolve(`.sync-cache.${target}.ndjson`);
+    this.recoveryPath = path.resolve(`.sync-recovery.${target}.json`);
 
     // Migrate from old JSON cache if exists
     const migration = await migrateFromJsonCache(oldJsonCachePath, ndjsonCachePath, target);
@@ -1093,6 +1246,17 @@ export class SftpPushSyncApp {
     );
     this.logger = new SyncLogger(logFile, { enableTimestamps: this.logTimestamps });
     await this.logger.init();
+
+    const previousRecovery = await this._loadRecoveryState();
+    if (previousRecovery?.status === "running" || previousRecovery?.status === "interrupted") {
+      this.wlog(
+        pc.yellow(
+          `${TAB_A}Previous run was ${previousRecovery.status} during ${previousRecovery.phase}. ` +
+          "The next sync will re-check affected files safely."
+        )
+      );
+    }
+    await this._writeRecoveryState("running", "connecting");
 
     // Header
     this.log("\n" + hr2());
@@ -1149,11 +1313,17 @@ export class SftpPushSyncApp {
     // connection instead of dying mid-flight and losing progress/leaving the
     // connection open.
     let shuttingDown = false;
+    let currentPhase = "connecting";
     const handleShutdownSignal = async (signal) => {
       if (shuttingDown) return;
       shuttingDown = true;
+      await this._writeRecoveryState("interrupted", currentPhase, { signal }).catch(() => {});
+      this.progressBar?.stop();
+      this.batchProgress?.stop();
       this.log("");
       this.wlog(pc.yellow(`⚠ Received ${signal}, shutting down gracefully…`));
+      this.log(`${TAB_A}Last active phase: ${pc.cyan(currentPhase)}`);
+      this.log(`${TAB_A}No new file operations will be started.`);
       try {
         if (this.hashCache?.save) await this.hashCache.save();
         if (this.hashCache?.close) await this.hashCache.close();
@@ -1229,10 +1399,13 @@ export class SftpPushSyncApp {
         this.log("");
         this.log(pc.bold(pc.cyan("📊 Summary (bypass only):")));
         this.log(`${TAB_A}Duration: ${pc.green(durationFormatted)} (${durationSec.toFixed(1)}s)`);
+        await this._clearRecoveryState();
         return;
       }
 
       // Phase 1 + 2 – Scan
+      currentPhase = "scan local and remote";
+      await this._writeRecoveryState("running", currentPhase);
       this.log("");
       this.log(
         pc.bold(
@@ -1246,33 +1419,12 @@ export class SftpPushSyncApp {
 
       const scanProgress = new ScanProgressController({
         writeLogLine: (line) => this._writeLogFile(line),
+        maxVisibleSlots: this.isVerbose ? this.connection.workerList : 3,
       });
 
-      let local;
-      let remoteScan;
-
-      if (this.parallelScan) {
-        [local, remoteScan] = await Promise.all([
-          walkLocal(this.connection.localRoot, {
-            filterFn: (rel) => this.isIncluded(rel),
-            classifyFn: (rel) => ({
-              isText: this.isTextFile(rel),
-              isMedia: this.isMediaFile(rel),
-            }),
-            progress: scanProgress,
-            scanChunk: this.scanChunk,
-            log: (msg) => this.log(msg),
-          }),
-          walkRemote(sftp, this.connection.remoteRoot, {
-            filterFn: (rel) => this.isIncluded(rel),
-            progress: scanProgress,
-            scanChunk: this.scanChunk,
-            log: (msg) => this.log(msg),
-            concurrency: this.connection.workerList,
-          }),
-        ]);
-      } else {
-        local = await walkLocal(this.connection.localRoot, {
+      const runLocalScan = async () => {
+        this.progressMetrics.start("local scan");
+        const result = await walkLocal(this.connection.localRoot, {
           filterFn: (rel) => this.isIncluded(rel),
           classifyFn: (rel) => ({
             isText: this.isTextFile(rel),
@@ -1282,13 +1434,48 @@ export class SftpPushSyncApp {
           scanChunk: this.scanChunk,
           log: (msg) => this.log(msg),
         });
-        remoteScan = await walkRemote(sftp, this.connection.remoteRoot, {
+        const bytes = [...result.values()].reduce(
+          (sum, file) => sum + Number(file.size || 0),
+          0
+        );
+        this.progressMetrics.finish("local scan", {
+          files: result.size,
+          bytes,
+        });
+        return result;
+      };
+
+      const runRemoteScan = async () => {
+        this.progressMetrics.start("remote listing");
+        const result = await walkRemote(sftp, this.connection.remoteRoot, {
           filterFn: (rel) => this.isIncluded(rel),
           progress: scanProgress,
           scanChunk: this.scanChunk,
           log: (msg) => this.log(msg),
           concurrency: this.connection.workerList,
         });
+        const bytes = [...result.files.values()].reduce(
+          (sum, file) => sum + Number(file.size || 0),
+          0
+        );
+        this.progressMetrics.finish("remote listing", {
+          files: result.files.size,
+          bytes,
+        });
+        return result;
+      };
+
+      let local;
+      let remoteScan;
+
+      if (this.parallelScan) {
+        [local, remoteScan] = await Promise.all([
+          runLocalScan(),
+          runRemoteScan(),
+        ]);
+      } else {
+        local = await runLocalScan();
+        remoteScan = await runRemoteScan();
       }
 
       const remote = remoteScan.files;
@@ -1312,7 +1499,10 @@ export class SftpPushSyncApp {
       this.log("");
 
       // Phase 3 – Analyse Differences (delegiert an Helper)
+      currentPhase = "compare and decide";
+      await this._writeRecoveryState("running", currentPhase);
       this.log(pc.bold(pc.cyan("🔎 Phase 3: Compare & Decide …")));
+      this.progressMetrics.start("compare");
 
       const { getLocalHash, getRemoteHash } = this.hashCache;
 
@@ -1326,6 +1516,7 @@ export class SftpPushSyncApp {
             getLocalHash,
             getRemoteHash,
             analyzeChunk: this.analyzeChunk,
+            sizeOnly,
             updateProgress: (prefix, current, total, rel) => {
               this.batchProgress.clear();
               this.updateProgress2(prefix, current, total, rel, "Files");
@@ -1345,6 +1536,10 @@ export class SftpPushSyncApp {
 
       toAdd = diffResult.toAdd;
       toUpdate = diffResult.toUpdate;
+      this.progressMetrics.finish("compare", {
+        files: local.size,
+        bytes: [...local.values()].reduce((sum, file) => sum + Number(file.size || 0), 0),
+      });
 
       // Report large files that skipped hash comparison
       if (diffResult.largeFilesSkipped && diffResult.largeFilesSkipped.length > 0 && this.isVerbose) {
@@ -1369,15 +1564,22 @@ export class SftpPushSyncApp {
       } else if (!this.isLaconic) {
         this.log("");
         this.log(pc.bold(pc.cyan("Changes (analysis):")));
-        [...toAdd].forEach((t) =>
-          this.log(`${TAB_A}${ADD} ${pc.green("New:")} ${t.rel}`)
-        );
-        [...toUpdate].forEach((t) =>
-          this.log(`${TAB_A}${CHA} ${pc.yellow("Changed:")} ${t.rel}`)
-        );
+        const changeCount = toAdd.length + toUpdate.length;
+        if (this.isVerbose || changeCount <= 20) {
+          [...toAdd].forEach((t) =>
+            this.log(`${TAB_A}${ADD} ${pc.green("New:")} ${t.rel}`)
+          );
+          [...toUpdate].forEach((t) =>
+            this.log(`${TAB_A}${CHA} ${pc.yellow("Changed:")} ${t.rel}`)
+          );
+        } else {
+          this.log(`${TAB_A}${pc.dim(`${changeCount} changes detected; use --verbose to list files.`)}`);
+        }
       }
 
       // Phase 4 – Remote deletes
+      currentPhase = "find remote deletes";
+      await this._writeRecoveryState("running", currentPhase);
       this.log("");
       this.log(pc.bold(pc.cyan("🧹 Phase 4: Removing orphaned remote files …")));
 
@@ -1388,6 +1590,37 @@ export class SftpPushSyncApp {
       }
 
       toDelete = computeRemoteDeletes({ local, remote });
+
+      const localBytes = [...local.values()].reduce(
+        (sum, file) => sum + Number(file.size || 0),
+        0
+      );
+      const remoteBytes = [...remote.values()].reduce(
+        (sum, file) => sum + Number(file.size || 0),
+        0
+      );
+      const plannedUploadBytes = [...toAdd, ...toUpdate].reduce(
+        (sum, file) => sum + Number(file.local?.size || 0),
+        0
+      );
+      this.log("");
+      this.log(pc.bold(pc.cyan("Sync plan:")));
+      this.log(`${TAB_A}Local : ${local.size} files, ${this._formatBytes(localBytes)}`);
+      this.log(`${TAB_A}Remote: ${remote.size} files, ${this._formatBytes(remoteBytes)}`);
+      this.log(`${TAB_A}Changes: ${toAdd.length} add, ${toUpdate.length} update, ${toDelete.length} delete`);
+      this.log(`${TAB_A}Upload size: ${this._formatBytes(plannedUploadBytes)}`);
+      this.log(`${TAB_A}Effort: ${this._getWorkloadCategory({ toAdd, toUpdate, toDelete })}`);
+      const workloadEstimate = this._getWorkloadEstimate({
+        toAdd,
+        toUpdate,
+        toDelete,
+        uploadBytes: plannedUploadBytes,
+        workers: this.connection.workers,
+      });
+      this.log(
+        `${TAB_A}Estimate: ${this._formatEstimate(workloadEstimate.minSec)}–${this._formatEstimate(workloadEstimate.maxSec)} ` +
+        `(rough transfer estimate; ${workloadEstimate.risk})`
+      );
 
       if (toDelete.length === 0) {
         this.log(`${TAB_A}No orphaned remote files found.`);
@@ -1419,6 +1652,12 @@ export class SftpPushSyncApp {
 
       // Phase 5 – Apply changes
       if (!dryRun) {
+        currentPhase = "apply changes";
+        await this._writeRecoveryState("running", currentPhase, {
+          plannedAdds: toAdd.length,
+          plannedUpdates: toUpdate.length,
+          plannedDeletes: toDelete.length,
+        });
         this.log("");
         this.log(pc.bold(pc.cyan("🚚 Phase 5: Apply changes …")));
 
@@ -1493,6 +1732,8 @@ export class SftpPushSyncApp {
 
       // Optional: leere Verzeichnisse aufräumen
       if (!dryRun && this.cleanupEmptyDirsEnabled) {
+        currentPhase = "cleanup empty directories";
+        await this._writeRecoveryState("running", currentPhase);
         this.log("");
         this.log(
           pc.bold(pc.cyan("🧹 Cleaning up empty remote directories …"))
@@ -1522,6 +1763,18 @@ export class SftpPushSyncApp {
       this.log(`${TAB_A}${ADD} Added  : ${toAdd.length}`);
       this.log(`${TAB_A}${CHA} Changed: ${toUpdate.length}`);
       this.log(`${TAB_A}${DEL} Deleted: ${toDelete.length}`);
+      const cacheStats = this.hashCache.getStats?.();
+      if (cacheStats && cacheStats.hits + cacheStats.misses > 0) {
+        this.log(
+          `${TAB_A}Hash cache: ${cacheStats.hits} hits, ${cacheStats.misses} misses ` +
+          `(${(cacheStats.hitRate * 100).toFixed(1)}% hit rate)`
+        );
+      }
+      const slowestPhase = this.progressMetrics.slowest();
+      if (slowestPhase) {
+        this.log(`${TAB_A}Slowest phase: ${pc.yellow(slowestPhase.name)} (${this._formatPhaseMetric(slowestPhase)})`);
+      }
+      this._logPhaseMetrics();
       if (this.autoExcluded.size > 0) {
         this.log(
           `${TAB_A}${EXC} Excluded via sidecar upload/download: ${
@@ -1558,7 +1811,11 @@ export class SftpPushSyncApp {
 
       this.log("");
       this.log(pc.bold(pc.green("✅ Sync complete.")));
+      await this._clearRecoveryState();
     } catch (err) {
+      await this._writeRecoveryState("failed", currentPhase, {
+        error: err?.message || String(err),
+      }).catch(() => {});
       const hint = describeSftpError(err);
       this.elog(pc.red("❌ Synchronisation error:"), err?.message || err);
       if (hint) {

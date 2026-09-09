@@ -26,3 +26,13 @@ export const SPINNER_FRAMES = [
   "⠇",
   "⠏",
 ];
+
+export const PROGRESS_STATUS_LABELS = {
+  queued: "waiting",
+  local: "comparing local",
+  remote: "comparing remote",
+  text: "comparing text",
+  done: "identical",
+  changed: "changed",
+  error: "failed",
+};

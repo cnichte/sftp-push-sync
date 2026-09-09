@@ -123,6 +123,12 @@ export async function createHashCacheNDJSON({ cachePath, namespace, autoSaveInte
   // Auto-save tracking
   let changesSinceLastSave = 0;
   let saveInProgress = false;
+  const hashStats = {
+    localHits: 0,
+    localMisses: 0,
+    remoteHits: 0,
+    remoteMisses: 0,
+  };
 
   // Load existing cache if present
   await loadCache();
@@ -208,9 +214,12 @@ export async function createHashCacheNDJSON({ cachePath, namespace, autoSaveInte
       cached.size === meta.size &&
       Math.abs(cached.mtimeMs - meta.mtimeMs) < 1000
     ) {
+      hashStats.localHits += 1;
       if (onProgress) onProgress(meta.size, meta.size, true);
       return cached.hash;
     }
+
+    hashStats.localMisses += 1;
 
     // Cache miss or stale: compute new hash
     const filePath = meta.fullPath || meta.localPath;
@@ -243,9 +252,12 @@ export async function createHashCacheNDJSON({ cachePath, namespace, autoSaveInte
       cached.size === meta.size &&
       cached.modifyTime === meta.modifyTime
     ) {
+      hashStats.remoteHits += 1;
       if (onProgress) onProgress(meta.size, meta.size, true);
       return cached.hash;
     }
+
+    hashStats.remoteMisses += 1;
 
     // Cache miss or stale: compute new hash
     const filePath = meta.fullPath || meta.remotePath;
@@ -328,10 +340,16 @@ export async function createHashCacheNDJSON({ cachePath, namespace, autoSaveInte
    * Get cache statistics
    */
   function getStats() {
+    const hits = hashStats.localHits + hashStats.remoteHits;
+    const misses = hashStats.localMisses + hashStats.remoteMisses;
     return {
       localEntries: localCache.size,
       remoteEntries: remoteCache.size,
       totalEntries: localCache.size + remoteCache.size,
+      ...hashStats,
+      hits,
+      misses,
+      hitRate: hits + misses > 0 ? hits / (hits + misses) : 0,
     };
   }
 

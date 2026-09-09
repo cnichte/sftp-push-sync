@@ -32,7 +32,7 @@ The file `sftp-push-sync.mjs` is pure JavaScript (ESM). Node.js can execute it d
 ## News
 
 - Latest Version: `3.0.4`
-- I’ve improved the loading-bar and made a lot of stability & performance improvements in the latest Updates, [see also CHANGELOG.md](CHANGELOG.md).
+- I’ve improved the loading-bar and made a lot of stability & performance improvements in the latest Updates, [see also CHANGELOG.md](https://github.com/cnichte/sftp-push-sync/blob/main/CHANGELOG.md).
 
 ### Breaking changes in 3.0.0
 
@@ -223,6 +223,20 @@ Logging can also be configured.
 - `analyzeChunk` - After how many elements should a log output be generated during analysis?
 
 For >100k files, use analyzeChunk = 10 or 50, otherwise the TTY output itself is a relevant factor.
+
+### Progress output
+
+The normal progress view stays compact and shows up to three active remote-listing workers. Use `--verbose` to show all configured listing workers and additional phase details.
+
+For change lists with more than 20 added or updated files, normal mode prints a count instead of every path. Use `--verbose` when the complete file list is needed.
+
+After scanning and comparing, the sync plan reports local and remote file counts, planned changes, upload size, workload category, and a rough transfer-time range. The estimate is intentionally a band rather than an exact ETA because server latency and connection quality can dominate the actual duration.
+
+During operations, progress bars show the current rate and ETA where a total is known. Large binary comparisons additionally show a per-file MB/s rate. The final summary includes completed phase durations and identifies the slowest phase.
+
+Use `--size-only` only when matching file sizes are sufficient for your workflow. Equal-size files are treated as unchanged and content hashes are skipped; files with different sizes are still uploaded.
+
+If a run is interrupted, a target-specific `.sync-recovery.<target>.json` file records the last active phase and task progress. The next run reports this state and re-checks affected files safely. Recovery data is removed after a successful sync; it does not cause files to be skipped blindly.
 
 ### Wildcards
 

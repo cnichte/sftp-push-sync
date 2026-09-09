@@ -75,6 +75,7 @@ function createCompareJob(rel, local, maxSizeForHash = Infinity) {
  *  - concurrency: Max parallele Vergleiche (default: 5)
  *  - log: optional logging function for errors/warnings
  *  - maxSizeForHash: Files larger than this skip hash comparison (default: 50MB)
+ *  - sizeOnly: Treat equal-size files as unchanged without content comparison
  */
 export async function analyseDifferences({
   local,
@@ -88,6 +89,7 @@ export async function analyseDifferences({
   concurrency = 10,
   log,
   maxSizeForHash = 50 * 1024 * 1024, // 50MB default
+  sizeOnly = false,
   updateBatchProgress = null,
 }) {
   // Track errors for summary
@@ -134,9 +136,11 @@ export async function analyseDifferences({
     //   } else {
     //     largeFilesSkipped.push({ rel, size: l.size });
     //   }
-    } else {
+    } else if (!sizeOnly) {
       // Size gleich, normale Größe → Content-Vergleich nötig
       keysNeedContentCompare.push(rel);
+    } else {
+      largeFilesSkipped.push({ rel, size: l.size });
     }
 
     checked++;

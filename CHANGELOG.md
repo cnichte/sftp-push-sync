@@ -1,6 +1,14 @@
 # Changelog
 
-## [3.0.5] - 2026-09-10
+## [Unreleased]
+
+- Progress output now includes phase durations, rates, ETA, workload estimates, and cache hit statistics.
+- Graceful shutdown persists a per-target recovery state with the last active phase and task progress.
+- A subsequent run reports interrupted state and safely re-checks affected files instead of skipping them blindly.
+- Normal progress output stays compact; `--verbose` shows all configured scan workers.
+- Added explicit `--size-only` mode for workflows where equal file size is sufficient; different-size files are still uploaded.
+
+## [3.0.5] - 2026-09-09
 
 - Scan-Phase 1 + 2 accelerated
   - The `worker` property is now called `workerUpload`, which describes more precisely what is happening here: it defines the number of parallel workers for the upload.

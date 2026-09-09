@@ -18,8 +18,9 @@ const LABEL_WIDTH = 11;
  * hier ein Spinner statt eines Fortschrittsbalkens.
  */
 export class ScanProgressController {
-  constructor({ writeLogLine } = {}) {
+  constructor({ writeLogLine, maxVisibleSlots = 3 } = {}) {
     this.writeLogLine = writeLogLine || (() => {});
+    this.maxVisibleSlots = Math.max(1, Number(maxVisibleSlots) || 3);
     this.channels = new Map(); // id -> { label, current, total, lastRel }
     this.slots = new Map(); // id -> Map<slotIndex, currentPath>
     this.interval = null;
@@ -145,7 +146,10 @@ export class ScanProgressController {
 
       if (!hasSlots) continue;
 
-      for (const slotIndex of [...channelSlots.keys()].sort((a, b) => a - b)) {
+      const visibleSlotIndexes = [...channelSlots.keys()]
+        .sort((a, b) => a - b)
+        .slice(0, this.maxVisibleSlots);
+      for (const slotIndex of visibleSlotIndexes) {
         const slot = channelSlots.get(slotIndex);
         const hint = shortenPathForProgress(toPosix(slot.path));
         const localCount = slot.total > 0

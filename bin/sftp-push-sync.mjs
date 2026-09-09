@@ -157,6 +157,7 @@ function printUsage() {
   console.log("");
   console.log(pc.bold("Options:"));
   console.log("  --dry-run            Do not change anything, just simulate");
+  console.log("  --size-only          Compare file sizes only, skip content hashes");
   console.log(
     "  --sidecar-upload    Run sidecar upload list (from sync.config.json)"
   );
@@ -167,6 +168,7 @@ function printUsage() {
     "  --skip-sync         Skip normal sync, only run sidecar upload/download"
   );
   console.log("  --verbose           Enable verbose logging");
+  console.log("                       Show all scan workers and detailed progress");
   console.log("  --laconic           Minimal logging (overrides verbose)");
   console.log(
     "  --config, -c <file> Use custom config file (default: ./sync.config.json)"
@@ -187,6 +189,7 @@ async function main() {
     runUploadList: RUN_UPLOAD_LIST,
     runDownloadList: RUN_DOWNLOAD_LIST,
     skipSync: SKIP_SYNC,
+    sizeOnly: SIZE_ONLY,
     cliLogLevel,
     configPath,
   });

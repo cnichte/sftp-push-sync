@@ -1327,7 +1327,9 @@ export class SftpPushSyncApp {
               this.updateProgress2(prefix, current, total, rel, "Files");
             },
             updateBatchProgress: ({ current, total, jobs, force = false }) => {
-              if (force) this._clearProgressLine();
+              // Kein _clearProgressLine() hier: das würde den MultiBar bei
+              // jedem force-Update stoppen/verwerfen und sofort neu aufbauen
+              // → Flackern. render() aktualisiert die Bars in-place.
               this.batchProgress.render({ current, total, jobs, force });
             },
             log: this.isVerbose ? (...m) => this.log(...m) : null,

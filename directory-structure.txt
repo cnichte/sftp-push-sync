@@ -1,14 +1,18 @@
 ./src
 ├── core
+│   ├── MultiLineProgressRenderer.mjs
 │   ├── ScanProgressController.mjs
 │   ├── SftpPushSyncApp.mjs
+│   ├── SimpleProgressBar.mjs
 │   └── SyncLogger.mjs
 └── helpers
     ├── compare.mjs
     ├── directory.mjs
+    ├── hash-cache-leveldb.mjs
+    ├── hash-cache-ndjson.mjs
     ├── hashing.mjs
     ├── progress-constants.mjs
     ├── sidecar.mjs
     └── walkers.mjs
 
-3 directories, 9 files
+3 directories, 13 files

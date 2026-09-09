@@ -8,7 +8,7 @@ Implements a push syncronisation with Dry-Run. Performs the following tasks:
 
 Why?
 
-Reliability was important to me here, so that no orphaned documents are left on the server and only the parts that have changed are actually updated.
+Reliability was mega important to me, so that for examlpe  no orphaned documents are left on the server and only the parts that have changed are actually updated.
 
 - I use the script to transfer [Hugo websites](https://gohugo.io) to the server.
 - This is part of the [Hugo-Toolbox](https://www.npmjs.com/package/hugo-toolbox).
@@ -26,11 +26,11 @@ Features:
 - include/exclude patterns
 - Sidecar uploads / downloads - Bypassing the sync process
 
-The file `sftp-push-sync.mjs` is pure JavaScript (ESM). Node.js can execute it directly as long as "type": "module" is specified in package.json or the file has the extension .mjs.
+The file `sftp-push-sync.mjs` is pure JavaScript (ESM). Node.js can execute it directly as long as `"type": "module"` is specified in `package.json` or the file has the extension `.mjs`.
 
 ## News
 
-- I’ve improved the loading bar and made a lot of stability & performance improvements in the lates Updates, [see also](CHANGELOG.md).
+- I’ve improved the loading-bar and made a lot of stability & performance improvements in the lates Updates, [see also](CHANGELOG.md).
 
 ### Breaking changes in 3.0.0
 

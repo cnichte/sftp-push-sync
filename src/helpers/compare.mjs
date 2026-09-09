@@ -8,6 +8,23 @@
 import fsp from "fs/promises";
 import path from "path";
 
+function formatBytes(bytes) {
+  const mb = bytes / (1024 * 1024);
+  return `${mb.toFixed(1)} MB`;
+}
+
+function createBatchJobs(batch, local) {
+  return batch.map((rel) => {
+    const meta = local.get(rel);
+    return {
+      rel,
+      status: "queued",
+      receivedBytes: 0,
+      totalBytes: meta?.size || 0,
+    };
+  });
+}
+
 /**
  * Analysiert Unterschiede zwischen local- und remote-Maps.
  * Optimiert: Echtes Batch-Processing mit Concurrency-Limit.
@@ -38,6 +55,7 @@ export async function analyseDifferences({
   concurrency = 10,
   log,
   maxSizeForHash = 50 * 1024 * 1024, // 50MB default
+  updateBatchProgress = null,
 }) {
   // Track errors for summary
   const compareErrors = [];
@@ -109,15 +127,34 @@ export async function analyseDifferences({
 
   for (let i = 0; i < totalContentCompare; i += concurrency) {
     const batch = keysNeedContentCompare.slice(i, i + concurrency);
+    const batchJobs = createBatchJobs(batch, local);
+    const batchJobByRel = new Map(batchJobs.map((job) => [job.rel, job]));
+
+    const renderBatch = (force = false) => {
+      if (!updateBatchProgress) return;
+      updateBatchProgress({
+        current: Math.min(i, totalContentCompare),
+        total: totalContentCompare,
+        jobs: batchJobs,
+        force,
+      });
+    };
+
+    renderBatch(true);
 
     const batchResults = await Promise.all(
       batch.map(async (rel) => {
         const l = local.get(rel);
         const r = remote.get(rel);
         const remotePath = path.posix.join(remoteRoot, rel);
+        const job = batchJobByRel.get(rel);
 
         try {
           if (l.isText) {
+            if (job) {
+              job.status = "text";
+              renderBatch(true);
+            }
             // Text-Datei: vollständiger inhaltlicher Vergleich
             const [localBuf, remoteBuf] = await Promise.all([
               fsp.readFile(l.localPath),
@@ -129,21 +166,61 @@ export async function analyseDifferences({
               Buffer.isBuffer(remoteBuf) ? remoteBuf : Buffer.from(remoteBuf)
             ).toString("utf8");
 
-            return localStr !== remoteStr
+            const changed = localStr !== remoteStr;
+            if (job) {
+              job.status = changed ? "changed" : "done";
+              job.receivedBytes = l.size;
+              renderBatch(true);
+            }
+
+            return changed
               ? { rel, local: l, remote: r, remotePath, changed: true }
               : null;
           } else {
             // Binary: Hash-Vergleich mit Cache
             if (!getLocalHash || !getRemoteHash) {
+              if (job) {
+                job.status = "changed";
+                renderBatch(true);
+              }
               return { rel, local: l, remote: r, remotePath, changed: true };
             }
 
+            if (log && l.size >= maxSizeForHash) {
+              log(`   → Large binary compare (${formatBytes(l.size)}): ${rel}`);
+            }
+
+            if (job) {
+              job.status = "local";
+              renderBatch(true);
+            }
+
             const [localHash, remoteHash] = await Promise.all([
-              getLocalHash(rel, l),
-              getRemoteHash(rel, r, sftp),
+              getLocalHash(rel, l, (received, total) => {
+                if (!job) return;
+                job.status = "local";
+                job.receivedBytes = received;
+                job.totalBytes = total || l.size || 0;
+                renderBatch();
+              }),
+              getRemoteHash(rel, r, sftp, (received, total) => {
+                if (!job) return;
+                job.status = "remote";
+                job.receivedBytes = received;
+                job.totalBytes = total || r.size || 0;
+                renderBatch();
+              }),
             ]);
 
-            return localHash !== remoteHash
+            const changed = localHash !== remoteHash;
+            if (job) {
+              job.status = changed ? "changed" : "done";
+              job.receivedBytes = l.size;
+              job.totalBytes = l.size;
+              renderBatch(true);
+            }
+
+            return changed
               ? { rel, local: l, remote: r, remotePath, changed: true }
               : null;
           }
@@ -153,6 +230,10 @@ export async function analyseDifferences({
           compareErrors.push({ rel, error: errMsg });
           if (log) {
             log(`   ⚠ Compare error for ${rel}: ${errMsg}`);
+          }
+          if (job) {
+            job.status = "error";
+            renderBatch(true);
           }
           // Mark as changed (sicherer) - file will be re-uploaded
           return { rel, local: l, remote: r, remotePath, changed: true, hadError: true };
@@ -169,8 +250,14 @@ export async function analyseDifferences({
 
     // Progress update - show as separate progress (doesn't jump back)
     const progressCount = Math.min(i + batch.length, totalContentCompare);
-    if (updateProgress) {
-      updateProgress("Analyse (hash): ", progressCount, totalContentCompare, batch[batch.length - 1]);
+    if (updateBatchProgress) {
+      updateBatchProgress({
+        current: progressCount,
+        total: totalContentCompare,
+        jobs: batchJobs,
+        done: true,
+        force: true,
+      });
     }
   }
 

@@ -23,12 +23,17 @@ import { Writable } from "stream";
 /**
  * Streaming-SHA256 für lokale Datei
  */
-export function hashLocalFile(filePath) {
+export function hashLocalFile(filePath, onProgress = null) {
   return new Promise((resolve, reject) => {
     const hash = createHash("sha256");
+    let totalReceived = 0;
     const stream = fs.createReadStream(filePath);
     stream.on("error", reject);
-    stream.on("data", (chunk) => hash.update(chunk));
+    stream.on("data", (chunk) => {
+      totalReceived += chunk.length;
+      hash.update(chunk);
+      if (onProgress) onProgress(totalReceived);
+    });
     stream.on("end", () => resolve(hash.digest("hex")));
   });
 }
@@ -43,7 +48,7 @@ export function hashLocalFile(filePath) {
  * @param {number} idleTimeoutMs - Timeout in ms when NO data is received (default: 60000)
  * @param {number} fileSizeBytes - File size (for logging)
  */
-export async function hashRemoteFile(sftp, remotePath, idleTimeoutMs = 60000, fileSizeBytes = 0) {
+export async function hashRemoteFile(sftp, remotePath, idleTimeoutMs = 60000, fileSizeBytes = 0, onProgress = null) {
   const hash = createHash("sha256");
   let lastDataTime = Date.now();
   let totalReceived = 0;
@@ -74,6 +79,7 @@ export async function hashRemoteFile(sftp, remotePath, idleTimeoutMs = 60000, fi
       lastDataTime = Date.now(); // Reset idle timer on each chunk
       totalReceived += chunk.length;
       hash.update(chunk);
+      if (onProgress) onProgress(totalReceived, fileSizeBytes);
       cb();
     },
   });
@@ -191,7 +197,7 @@ export async function createHashCacheNDJSON({ cachePath, namespace, autoSaveInte
   /**
    * Get cached local hash or compute and store it
    */
-  async function getLocalHash(rel, meta) {
+  async function getLocalHash(rel, meta, onProgress = null) {
     const key = localKey(rel);
     const cached = localCache.get(key);
 
@@ -201,12 +207,15 @@ export async function createHashCacheNDJSON({ cachePath, namespace, autoSaveInte
       cached.size === meta.size &&
       Math.abs(cached.mtimeMs - meta.mtimeMs) < 1000
     ) {
+      if (onProgress) onProgress(meta.size, meta.size, true);
       return cached.hash;
     }
 
     // Cache miss or stale: compute new hash
     const filePath = meta.fullPath || meta.localPath;
-    const hash = await hashLocalFile(filePath);
+    const hash = await hashLocalFile(filePath, (received) => {
+      if (onProgress) onProgress(received, meta.size || 0, false);
+    });
 
     localCache.set(key, {
       size: meta.size,
@@ -223,7 +232,7 @@ export async function createHashCacheNDJSON({ cachePath, namespace, autoSaveInte
   /**
    * Get cached remote hash or compute and store it
    */
-  async function getRemoteHash(rel, meta, sftp) {
+  async function getRemoteHash(rel, meta, sftp, onProgress = null) {
     const key = remoteKey(rel);
     const cached = remoteCache.get(key);
 
@@ -233,13 +242,16 @@ export async function createHashCacheNDJSON({ cachePath, namespace, autoSaveInte
       cached.size === meta.size &&
       cached.modifyTime === meta.modifyTime
     ) {
+      if (onProgress) onProgress(meta.size, meta.size, true);
       return cached.hash;
     }
 
     // Cache miss or stale: compute new hash
     const filePath = meta.fullPath || meta.remotePath;
     // Pass file size for dynamic timeout calculation
-    const hash = await hashRemoteFile(sftp, filePath, 60000, meta.size || 0);
+    const hash = await hashRemoteFile(sftp, filePath, 60000, meta.size || 0, (received, total) => {
+      if (onProgress) onProgress(received, total || meta.size || 0, false);
+    });
 
     remoteCache.set(key, {
       size: meta.size,

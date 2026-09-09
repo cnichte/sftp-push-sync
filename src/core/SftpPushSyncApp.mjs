@@ -15,6 +15,8 @@ import { createRequire } from "module";
 
 import { SyncLogger } from "./SyncLogger.mjs";
 import { ScanProgressController } from "./ScanProgressController.mjs";
+import { MultiLineProgressRenderer } from "./MultiLineProgressRenderer.mjs";
+import { SimpleProgressBar } from "./SimpleProgressBar.mjs";
 
 import { toPosix, shortenPathForProgress } from "../helpers/directory.mjs";
 import { createHashCacheNDJSON, migrateFromJsonCache } from "../helpers/hash-cache-ndjson.mjs";
@@ -29,7 +31,6 @@ import {
   hr2,
   TAB_A,
   TAB_B,
-  SPINNER_FRAMES,
 } from "../helpers/progress-constants.mjs";
 
 const require = createRequire(import.meta.url);
@@ -123,8 +124,8 @@ export class SftpPushSyncApp {
     this.analyzeChunk = 10;
     this.parallelScan = true;
 
-    this.progressActive = false;
-    this.spinnerIndex = 0;
+    this.progressBar = new SimpleProgressBar();
+    this.batchProgress = new MultiLineProgressRenderer({ maxLines: 10 });
 
     // Cleanup
     this.cleanupEmptyDirsEnabled = true;
@@ -151,15 +152,12 @@ export class SftpPushSyncApp {
   }
 
   _clearProgressLine() {
-    if (!process.stdout.isTTY || !this.progressActive) return;
+    this.progressBar?.stop();
+    this.batchProgress?.clear();
+  }
 
-    process.stdout.write("\r");
-    process.stdout.write("\x1b[2K");
-    process.stdout.write("\x1b[1B");
-    process.stdout.write("\x1b[2K");
-    process.stdout.write("\x1b[1A");
-
-    this.progressActive = false;
+  _stopBatchProgress() {
+    this.batchProgress?.stop();
   }
 
   _consoleAndLog(prefixForFile, ...msg) {
@@ -360,43 +358,21 @@ export class SftpPushSyncApp {
       `[progress] ${base}${rel ? " – " + rel : ""}`
     );
 
-    const frame = SPINNER_FRAMES[this.spinnerIndex];
-    this.spinnerIndex = (this.spinnerIndex + 1) % SPINNER_FRAMES.length;
-
     if (!process.stdout.isTTY) {
       if (total && total > 0) {
         const percent = ((current / total) * 100).toFixed(1);
         console.log(
-          `${TAB_A}${frame} ${prefix}${current}/${total} ${suffix} (${percent}%) – ${short}`
+          `${TAB_A}${prefix}${current}/${total} ${suffix} (${percent}%) – ${short}`
         );
       } else {
         console.log(
-          `${TAB_A}${frame} ${prefix}${current} ${suffix} – ${short}`
+          `${TAB_A}${prefix}${current} ${suffix} – ${short}`
         );
       }
       return;
     }
 
-    const width = process.stdout.columns || 80;
-
-    let line1;
-    if (total && total > 0) {
-      const percent = ((current / total) * 100).toFixed(1);
-      line1 = `${TAB_A}${frame} ${prefix}${current}/${total} ${suffix} (${percent}%)`;
-    } else {
-      line1 = `${TAB_A}${frame} ${prefix}${current} ${suffix}`;
-    }
-
-    let line2 = short || "";
-
-    if (line1.length > width) line1 = line1.slice(0, width - 1);
-    if (line2.length > width) line2 = line2.slice(0, width - 1);
-
-    process.stdout.write("\r" + line1.padEnd(width) + "\n");
-    process.stdout.write(line2.padEnd(width));
-    process.stdout.write("\x1b[1A");
-
-    this.progressActive = true;
+    this.progressBar.update(prefix, current, total, rel, suffix);
   }
 
   // ---------------------------------------------------------
@@ -621,8 +597,6 @@ export class SftpPushSyncApp {
     }
 
     this.updateProgress2("Prepare dirs: ", total, total, "done", "Folders");
-    process.stdout.write("\n");
-    this.progressActive = false;
   }
 
   // ---------------------------------------------------------
@@ -769,8 +743,6 @@ export class SftpPushSyncApp {
         "done",
         "Folders"
       );
-      process.stdout.write("\n");
-      this.progressActive = false;
     }
   }
 
@@ -1180,18 +1152,35 @@ export class SftpPushSyncApp {
 
       const { getLocalHash, getRemoteHash } = this.hashCache;
 
-      const diffResult = await analyseDifferences({
-        local,
-        remote,
-        remoteRoot: this.connection.remoteRoot,
-        sftp,
-        getLocalHash,
-        getRemoteHash,
-        analyzeChunk: this.analyzeChunk,
-        updateProgress: (prefix, current, total, rel) =>
-          this.updateProgress2(prefix, current, total, rel, "Files"),
-        log: this.isVerbose ? (...m) => this.log(...m) : null,
-      });
+      const diffResult = await (async () => {
+        try {
+          return await analyseDifferences({
+            local,
+            remote,
+            remoteRoot: this.connection.remoteRoot,
+            sftp,
+            getLocalHash,
+            getRemoteHash,
+            analyzeChunk: this.analyzeChunk,
+            updateProgress: (prefix, current, total, rel) => {
+              this.batchProgress.clear();
+              this.updateProgress2(prefix, current, total, rel, "Files");
+            },
+            updateBatchProgress: ({ current, total, jobs, force = false }) => {
+              const percent = total > 0 ? ((current / total) * 100).toFixed(1) : "0.0";
+              if (force) this._clearProgressLine();
+              this.batchProgress.render({
+                title: `Analyse (hash): ${current}/${total} Files (${percent}%)`,
+                jobs,
+                force,
+              });
+            },
+            log: this.isVerbose ? (...m) => this.log(...m) : null,
+          });
+        } finally {
+          this._stopBatchProgress();
+        }
+      })();
 
       toAdd = diffResult.toAdd;
       toUpdate = diffResult.toUpdate;

@@ -1,124 +1,92 @@
 /**
  * ScanProgressController.mjs
- * 
+ *
  * @author Carsten Nichte, 2025 / https://carsten-nichte.de/
- * 
- */ 
+ *
+ */
 // src/core/ScanProgressController.mjs
+import cliProgress from "cli-progress";
 import { toPosix, shortenPathForProgress } from "../helpers/directory.mjs";
 
-const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-const TAB_A = "   ";
+const LABEL_WIDTH = 11;
 
 /**
- * Hält zwei "Kanäle": local / remote
- * und rendert periodisch einen gemeinsamen Status.
+ * Hält zwei "Kanäle" (local / remote) und rendert sie als
+ * cli-progress MultiBar.
  */
 export class ScanProgressController {
   constructor({ writeLogLine } = {}) {
-    this.channels = new Map(); // id -> { label, current, total, lastRel }
-    this.interval = null;
-    this.spinnerIndex = 0;
     this.writeLogLine = writeLogLine || (() => {});
+    this.multibar = null;
+    this.bars = new Map(); // id -> bar instance
+  }
+
+  get enabled() {
+    return Boolean(process.stdout.isTTY && process.env.TERM !== "dumb");
   }
 
   start() {
-    if (!process.stdout.isTTY || this.interval) return;
-    this.interval = setInterval(() => this.render(), 80);
+    if (!this.enabled || this.multibar) return;
+    this.multibar = new cliProgress.MultiBar(
+      {
+        hideCursor: true,
+        clearOnComplete: true,
+        forceRedraw: true,
+        format: " {label} |{bar}| {value}{totalSuffix} Files | {hint}",
+      },
+      cliProgress.Presets.shades_classic
+    );
   }
 
   stop() {
-    if (this.interval) {
-      clearInterval(this.interval);
-      this.interval = null;
+    if (this.multibar) {
+      this.multibar.stop();
+      this.multibar = null;
     }
-
-    if (process.stdout.isTTY) {
-      const width = process.stdout.columns || 80;
-      process.stdout.write("\r" + " ".repeat(width) + "\n");
-      process.stdout.write(" ".repeat(width) + "\x1b[1A");
-    }
-
-    this.channels.clear();
+    this.bars.clear();
   }
 
   updateChannel(id, data) {
     // data: { label, current, total?, lastRel? }
-    this.channels.set(id, data);
-    if (!this.interval) this.start();
-
     const { label, current, total, lastRel } = data;
+
     const base =
       total && total > 0
         ? `${label}: ${current}/${total} Files`
         : `${label}: ${current} Files`;
 
     this.writeLogLine?.(
-      `[scan-progress] ${base}${
-        lastRel ? " – " + toPosix(lastRel) : ""
-      }`
+      `[scan-progress] ${base}${lastRel ? " – " + toPosix(lastRel) : ""}`
     );
+
+    if (!this.enabled) return;
+    this.start();
+
+    const hint = lastRel ? shortenPathForProgress(toPosix(lastRel)) : "waiting …";
+    const hasTotal = Boolean(total && total > 0);
+    const totalSuffix = hasTotal ? `/${total}` : "";
+    const barTotal = hasTotal ? total : Math.max(current, 1);
+    const payload = { label: label.padEnd(LABEL_WIDTH), hint, totalSuffix };
+
+    let bar = this.bars.get(id);
+    if (!bar) {
+      bar = this.multibar.create(barTotal, current, payload);
+      this.bars.set(id, bar);
+    } else {
+      bar.setTotal(barTotal);
+      bar.update(current, payload);
+    }
   }
 
   done(id) {
-    this.channels.delete(id);
-    if (this.channels.size === 0) {
+    const bar = this.bars.get(id);
+    if (bar && this.multibar) {
+      this.multibar.remove(bar);
+    }
+    this.bars.delete(id);
+
+    if (this.bars.size === 0) {
       this.stop();
     }
-  }
-
-  render() {
-    if (!process.stdout.isTTY) return;
-
-    this.spinnerIndex = (this.spinnerIndex + 1) % SPINNER_FRAMES.length;
-    const spin = SPINNER_FRAMES[this.spinnerIndex];
-    const width = process.stdout.columns || 80;
-
-    const entries = [...this.channels.entries()];
-    const local = entries.find(([id]) => id === "local")?.[1];
-    const remote = entries.find(([id]) => id === "remote")?.[1];
-
-    const headerParts = [];
-    if (local) {
-      headerParts.push(
-        `local ${local.current}${local.total ? "/" + local.total : ""}`
-      );
-    }
-    if (remote) {
-      headerParts.push(
-        `remote ${remote.current}${remote.total ? "/" + remote.total : ""}`
-      );
-    }
-
-    const header =
-      headerParts.length > 0
-        ? `Scan files: ${headerParts.join(", ")}`
-        : "Scan files: –";
-
-    const line1Raw = `${TAB_A}${spin} ${header}`;
-
-    const localHint = local?.lastRel
-      ? shortenPathForProgress(toPosix(local.lastRel))
-      : "";
-    const remoteHint = remote?.lastRel
-      ? shortenPathForProgress(toPosix(remote.lastRel))
-      : "";
-
-    const detailParts = [];
-    if (localHint) detailParts.push(`[local] ${localHint}`);
-    if (remoteHint) detailParts.push(`[remote] ${remoteHint}`);
-
-    const detail =
-      detailParts.length > 0 ? detailParts.join("    ") : "waiting …";
-
-    const line2Raw = `${TAB_A}→ ${detail}`;
-
-    const line1 =
-      line1Raw.length > width ? line1Raw.slice(0, width - 1) : line1Raw;
-    const line2 =
-      line2Raw.length > width ? line2Raw.slice(0, width - 1) : line2Raw;
-
-    process.stdout.write("\r" + line1.padEnd(width) + "\n");
-    process.stdout.write(line2.padEnd(width) + "\x1b[1A");
   }
 }

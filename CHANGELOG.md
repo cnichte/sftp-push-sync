@@ -1,12 +1,19 @@
 # Changelog
 
-## [Unreleased]
+## [4.0.0] - 2026-09-10
 
 - Progress output now includes phase durations, rates, ETA, workload estimates, and cache hit statistics.
 - Graceful shutdown persists a per-target recovery state with the last active phase and task progress.
 - A subsequent run reports interrupted state and safely re-checks affected files instead of skipping them blindly.
 - Normal progress output stays compact; `--verbose` shows all configured scan workers.
 - Added explicit `--size-only` mode for workflows where equal file size is sufficient; different-size files are still uploaded.
+- Recovery state now records completed paths and reports operations confirmed by the next comparison as not scheduled again.
+- Uploads now use same-directory temporary files and a final rename to avoid replacing target files with partial transfers.
+- Added a backup-and-restore fallback for SFTP servers which reject renaming over an existing target.
+- The fallback now runs only for existing-target rename errors and treats backup cleanup failure as a warning after a successful replacement.
+- Added byte-level resume for interrupted uploads through verified same-directory temporary files on servers that pass the capability check.
+- Added `--check-resume-support` to verify append, remote-size, read-back, and rename support without running a sync.
+- Reserved fixed progress field widths to prevent terminal lines from shifting as counters, ETA, rates, and states change.
 
 ## [3.0.5] - 2026-09-09
 

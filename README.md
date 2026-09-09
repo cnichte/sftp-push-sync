@@ -31,8 +31,8 @@ The file `sftp-push-sync.mjs` is pure JavaScript (ESM). Node.js can execute it d
 
 ## News
 
-- Latest Version: `3.0.4`
-- I’ve improved the loading-bar and made a lot of stability & performance improvements in the latest Updates, [see also CHANGELOG.md](https://github.com/cnichte/sftp-push-sync/blob/main/CHANGELOG.md).
+- Latest Version: `4.0.0` - Damit ist er "Feature Complete".
+- I’ve improved the loading-bar and made tons of stability, performance improvements in the latest Updates, [see also CHANGELOG.md](https://github.com/cnichte/sftp-push-sync/blob/main/CHANGELOG.md).
 
 ### Breaking changes in 3.0.0
 
@@ -232,11 +232,19 @@ For change lists with more than 20 added or updated files, normal mode prints a 
 
 After scanning and comparing, the sync plan reports local and remote file counts, planned changes, upload size, workload category, and a rough transfer-time range. The estimate is intentionally a band rather than an exact ETA because server latency and connection quality can dominate the actual duration.
 
-During operations, progress bars show the current rate and ETA where a total is known. Large binary comparisons additionally show a per-file MB/s rate. The final summary includes completed phase durations and identifies the slowest phase.
+During operations, progress bars show the current rate and ETA where a total is known. Counters, ETA, rate, state, and compare-phase fields reserve fixed display widths so terminal lines do not shift while values change. Large binary comparisons additionally show a per-file MB/s rate. The final summary includes completed phase durations and identifies the slowest phase.
 
 Use `--size-only` only when matching file sizes are sufficient for your workflow. Equal-size files are treated as unchanged and content hashes are skipped; files with different sizes are still uploaded.
 
-If a run is interrupted, a target-specific `.sync-recovery.<target>.json` file records the last active phase and task progress. The next run reports this state and re-checks affected files safely. Recovery data is removed after a successful sync; it does not cause files to be skipped blindly.
+If a run is interrupted, a target-specific `.sync-recovery.<target>.json` file records the last active phase, task progress, and completed paths. The next run reports this state and re-checks affected files safely. Paths confirmed by the fresh comparison are not scheduled again. Recovery data is removed after a successful sync; it does not cause files to be skipped blindly.
+
+This includes byte-level continuation of a partially uploaded temporary file when the target server supports it.
+
+Run `sftp-push-sync <target> --check-resume-support` to test append, remote-size verification, read-back, and rename support on a target server. The check uses uniquely named temporary files below the configured remote root and removes them afterwards. It does not run a sync.
+
+When this capability check passes, an interrupted upload keeps its own temporary remote file. The next run verifies its saved target path, expected local size, and actual remote size before uploading only the remaining bytes. Missing, oversized, or inconsistent temporary files automatically fall back to a complete atomic upload.
+
+Uploads use a temporary file in the target directory and rename it only after the transfer completes. On servers that do not allow renaming over an existing file, the old target is first moved to a temporary backup and restored if the replacement fails. An interrupted upload therefore does not replace the previous target file; temporary files are cleaned up when possible and are treated as remote orphans on the next sync if necessary.
 
 ### Wildcards
 

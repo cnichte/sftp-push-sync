@@ -11,6 +11,28 @@
 import cliProgress from "cli-progress";
 import { shortenPathForProgress } from "../helpers/directory.mjs";
 
+const STATE_WIDTH = 15;
+const SPEED_WIDTH = 8;
+
+function formatTimeFixed(seconds = 0, options, roundToMultipleOf = 1) {
+  const rounded = roundToMultipleOf * Math.round(seconds / roundToMultipleOf);
+  const pad = (value) => String(value).padStart(2, options.autopaddingChar || "0");
+  let formatted;
+  if (rounded > 3600) {
+    formatted = `${pad(Math.floor(rounded / 3600))}h${pad(Math.floor((rounded % 3600) / 60))}m`;
+  } else if (rounded > 60) {
+    formatted = `${pad(Math.floor(rounded / 60))}m${pad(rounded % 60)}s`;
+  } else {
+    formatted = `${pad(rounded)}s`;
+  }
+  return formatted.padStart(7);
+}
+
+function formatCount(current, total) {
+  const width = String(Math.max(total, 1)).length;
+  return `${String(current).padStart(width)}/${String(total).padStart(width)}`;
+}
+
 export class SimpleProgressBar {
   constructor() {
     this.bar = null;
@@ -43,8 +65,9 @@ export class SimpleProgressBar {
           hideCursor: true,
           clearOnComplete: true,
           forceRedraw: true,
+          formatTime: formatTimeFixed,
           format: hasTotal
-            ? `   ${label}|{bar}| {percentage}% | {value}/{total} ${suffix} | ETA {eta_formatted} | {speed} ${suffix}/s | {state} | {rel}`
+            ? `   ${label}|{bar}| {percentage}% | {count} ${suffix} | ETA {eta_formatted} | {speed} ${suffix}/s | {state} | {rel}`
             : `   ${label}{value} ${suffix} | {speed} ${suffix}/s | {state} | {rel}`,
         },
         cliProgress.Presets.rect
@@ -52,6 +75,7 @@ export class SimpleProgressBar {
       this.startedAt = Date.now();
       this.bar.start(hasTotal ? total : Math.max(current, 1), 0, {
         rel: shortenPathForProgress(rel),
+        count: formatCount(0, hasTotal ? total : Math.max(current, 1)),
         speed: "0.0",
         state: "starting",
       });
@@ -61,8 +85,9 @@ export class SimpleProgressBar {
     const speed = current / elapsedSec;
     this.bar.update(current, {
       rel: shortenPathForProgress(rel),
-      speed: speed.toFixed(1),
-      state: elapsedSec >= 3 && current > 0 && speed < 0.5 ? "slow but steady" : "active",
+      count: formatCount(current, hasTotal ? total : Math.max(current, 1)),
+      speed: speed.toFixed(1).padStart(SPEED_WIDTH),
+      state: (elapsedSec >= 3 && current > 0 && speed < 0.5 ? "slow but steady" : "active").padEnd(STATE_WIDTH),
     });
 
     if (isDone) this.stop();

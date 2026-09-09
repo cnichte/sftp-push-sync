@@ -2,7 +2,7 @@
 /**
  ** sftp-push-sync.mjs - SFTP Syncronisations Tool
  *
- * @author Carsten Nichte, 2025 / https://carsten-nichte.de/
+ * @author Carsten Nichte, 2025, https://carsten-nichte.de/
  *
  * SFTP push sync with dry run
  * 1. Upload new files
@@ -81,6 +81,7 @@ let RUN_UPLOAD_LIST = false;
 let RUN_DOWNLOAD_LIST = false;
 let SKIP_SYNC = false;
 let SIZE_ONLY = false;
+let CHECK_RESUME_SUPPORT = false;
 let cliLogLevel = null;
 let configPath = undefined;
 
@@ -95,6 +96,9 @@ for (let i = 0; i < rest.length; i += 1) {
       break;
     case "--size-only":
       SIZE_ONLY = true;
+      break;
+    case "--check-resume-support":
+      CHECK_RESUME_SUPPORT = true;
       break;
     case "--sidecar-upload":
       RUN_UPLOAD_LIST = true;
@@ -158,6 +162,7 @@ function printUsage() {
   console.log(pc.bold("Options:"));
   console.log("  --dry-run            Do not change anything, just simulate");
   console.log("  --size-only          Compare file sizes only, skip content hashes");
+  console.log("  --check-resume-support  Test remote append and rename capabilities only");
   console.log(
     "  --sidecar-upload    Run sidecar upload list (from sync.config.json)"
   );
@@ -190,6 +195,7 @@ async function main() {
     runDownloadList: RUN_DOWNLOAD_LIST,
     skipSync: SKIP_SYNC,
     sizeOnly: SIZE_ONLY,
+    checkResumeSupport: CHECK_RESUME_SUPPORT,
     cliLogLevel,
     configPath,
   });

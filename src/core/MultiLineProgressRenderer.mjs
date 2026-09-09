@@ -13,9 +13,32 @@ import pc from "picocolors";
 import { shortenPathForProgress } from "../helpers/directory.mjs";
 import { PROGRESS_STATUS_LABELS } from "../helpers/progress-constants.mjs";
 
+const PHASES_WIDTH = 42;
+const STATE_WIDTH = 15;
+const SPEED_WIDTH = 8;
+
 function formatBytes(bytes = 0) {
   const mb = bytes / (1024 * 1024);
   return `${mb.toFixed(1)} MB`;
+}
+
+function formatTimeFixed(seconds = 0, options, roundToMultipleOf = 1) {
+  const rounded = roundToMultipleOf * Math.round(seconds / roundToMultipleOf);
+  const pad = (value) => String(value).padStart(2, options.autopaddingChar || "0");
+  let formatted;
+  if (rounded > 3600) {
+    formatted = `${pad(Math.floor(rounded / 3600))}h${pad(Math.floor((rounded % 3600) / 60))}m`;
+  } else if (rounded > 60) {
+    formatted = `${pad(Math.floor(rounded / 60))}m${pad(rounded % 60)}s`;
+  } else {
+    formatted = `${pad(rounded)}s`;
+  }
+  return formatted.padStart(7);
+}
+
+function formatCount(current, total) {
+  const width = String(Math.max(total, 1)).length;
+  return `${String(current).padStart(width)}/${String(total).padStart(width)}`;
 }
 
 /**
@@ -44,11 +67,12 @@ export class MultiLineProgressRenderer {
         clearOnComplete: true,
         forceRedraw: true,
         autopadding: true,
+        formatTime: formatTimeFixed,
       },
       cliProgress.Presets.rect
     );
     this.headerBar = this.multibar.create(1, 0, { phases: "" }, {
-      format: pc.bold(pc.cyan(" {bar} {percentage}% | {value}/{total} Files | ETA {eta_formatted} | {speed} Files/s | {state} | {phases}")),
+      format: pc.bold(pc.cyan(" {bar} {percentage}% | {count} Files | ETA {eta_formatted} | {speed} Files/s | {state} | {phases}")),
     });
     this.headerStartedAt = Date.now();
   }
@@ -76,11 +100,12 @@ export class MultiLineProgressRenderer {
     this.headerBar.setTotal(total || 1);
     const elapsedSec = Math.max((Date.now() - this.headerStartedAt) / 1000, 0.001);
     this.headerBar.update(Math.min(current, total || 1), {
-      phases: this.formatPhaseSummary(jobs),
-      speed: (current / elapsedSec).toFixed(1),
-      state: elapsedSec >= 3 && current > 0 && current / elapsedSec < 0.5
+      count: formatCount(current, total || 1),
+      phases: this.formatPhaseSummary(jobs).slice(0, PHASES_WIDTH).padEnd(PHASES_WIDTH),
+      speed: (current / elapsedSec).toFixed(1).padStart(SPEED_WIDTH),
+      state: (elapsedSec >= 3 && current > 0 && current / elapsedSec < 0.5
         ? "slow but steady"
-        : "active",
+        : "active").padEnd(STATE_WIDTH),
     });
 
     const visibleJobs = jobs.slice(0, this.maxLines);

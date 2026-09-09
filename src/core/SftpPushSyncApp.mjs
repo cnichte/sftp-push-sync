@@ -7,6 +7,7 @@
 // src/core/SftpPushSyncApp.mjs
 import fs from "fs";
 import fsp from "fs/promises";
+import { randomUUID } from "crypto";
 import path from "path";
 import SftpClient from "ssh2-sftp-client";
 import { minimatch } from "minimatch";
@@ -144,6 +145,8 @@ export class SftpPushSyncApp {
     this.recoveryPath = null;
     this.recoveryState = null;
     this.recoveryWriteQueue = Promise.resolve();
+    this.previousRecovery = null;
+    this.activeResumeUploads = new Map();
   }
 
   // ---------------------------------------------------------
@@ -270,35 +273,121 @@ export class SftpPushSyncApp {
   async _uploadFile(sftp, localPath, remotePath, rel, size) {
     const LARGE_FILE_THRESHOLD = 5 * 1024 * 1024; // 5MB
     const sizeMB = (size / (1024 * 1024)).toFixed(1);
-    
-    // For small files, just use put
-    if (size < LARGE_FILE_THRESHOLD) {
-      await sftp.put(localPath, remotePath);
-      return;
-    }
+    const remoteDir = path.posix.dirname(remotePath);
+    const remoteName = path.posix.basename(remotePath);
+    const resumeUpload = this.activeResumeUploads.get(rel) ||
+      this.previousRecovery?.resumeUploads?.[rel];
+    const canResume = resumeUpload &&
+      resumeUpload.remotePath === remotePath &&
+      resumeUpload.size === size &&
+      typeof resumeUpload.temporaryPath === "string";
+    const temporaryPath = canResume ? resumeUpload.temporaryPath : path.posix.join(
+      remoteDir,
+      `.${remoteName}.sftp-push-sync-${process.pid}-${randomUUID()}.tmp`
+    );
+    const backupPath = path.posix.join(
+      remoteDir,
+      `.${remoteName}.sftp-push-sync-backup-${process.pid}-${randomUUID()}.tmp`
+    );
 
-    // For large files, try fastPut with progress
-    let lastReportedPercent = 0;
-    const shortRel = rel.length > 50 ? '...' + rel.slice(-47) : rel;
-
-    try {
-      await sftp.fastPut(localPath, remotePath, {
-        step: (transferred, chunk, total) => {
-          const percent = Math.floor((transferred / total) * 100);
-          // Only log at 25%, 50%, 75%, 100%
-          if (percent >= lastReportedPercent + 25) {
-            lastReportedPercent = Math.floor(percent / 25) * 25;
-            this.log(`${TAB_A}${pc.dim(`  ↑ ${sizeMB}MB ${percent}%: ${shortRel}`)}`);
-          }
-        }
-      });
-    } catch (fastPutErr) {
-      // fastPut not supported by server, fall back to regular put
-      if (this.isVerbose) {
-        this.vlog(`${TAB_A}${pc.dim(`  fastPut failed, using put: ${fastPutErr?.message}`)}`);
+    const uploadPath = async (targetPath, offset = 0) => {
+      if (offset > 0) {
+        this.log(`${TAB_A}${pc.dim(`  Resuming ${shortenPathForProgress(rel)} at ${this._formatBytes(offset)}…`)}`);
+        await new Promise((resolve, reject) => {
+          const readStream = fs.createReadStream(localPath, { start: offset });
+          const writeStream = sftp.createWriteStream(targetPath, {
+            flags: "r+",
+            start: offset,
+          });
+          readStream.on("error", reject);
+          writeStream.on("error", reject);
+          writeStream.on("finish", resolve);
+          readStream.pipe(writeStream);
+        });
+        return;
       }
-      this.log(`${TAB_A}${pc.dim(`  Uploading ${sizeMB}MB: ${shortRel}`)}`);
-      await sftp.put(localPath, remotePath);
+      if (size < LARGE_FILE_THRESHOLD) {
+        await sftp.put(localPath, targetPath);
+        return;
+      }
+
+      let lastReportedPercent = 0;
+      const shortRel = rel.length > 50 ? "..." + rel.slice(-47) : rel;
+      try {
+        await sftp.fastPut(localPath, targetPath, {
+          step: (transferred, chunk, total) => {
+            const percent = Math.floor((transferred / total) * 100);
+            if (percent >= lastReportedPercent + 25) {
+              lastReportedPercent = Math.floor(percent / 25) * 25;
+              this.log(`${TAB_A}${pc.dim(`  ↑ ${sizeMB}MB ${percent}%: ${shortRel}`)}`);
+            }
+          },
+        });
+      } catch (fastPutErr) {
+        if (this.isVerbose) {
+          this.vlog(`${TAB_A}${pc.dim(`  fastPut failed, using put: ${fastPutErr?.message}`)}`);
+        }
+        this.log(`${TAB_A}${pc.dim(`  Uploading ${sizeMB}MB: ${shortRel}`)}`);
+        await sftp.put(localPath, targetPath);
+      }
+    };
+    
+    try {
+      this.activeResumeUploads.set(rel, { temporaryPath, remotePath, size });
+      await this._writeRecoveryState("running", "apply changes");
+
+      let offset = 0;
+      if (canResume) {
+        try {
+          const temporaryStat = await sftp.stat(temporaryPath);
+          const remoteSize = Number(temporaryStat.size);
+          if (Number.isFinite(remoteSize) && remoteSize > 0 && remoteSize < size) {
+            offset = remoteSize;
+          } else if (remoteSize >= size) {
+            await sftp.delete(temporaryPath);
+          }
+        } catch {
+          // The previous temporary file is unavailable; restart atomically.
+        }
+      }
+      await uploadPath(temporaryPath, offset);
+      try {
+        await sftp.rename(temporaryPath, remotePath);
+      } catch (renameError) {
+        const message = renameError?.message || String(renameError);
+        if (!/already exists|file exists|eexist/i.test(message)) {
+          throw renameError;
+        }
+        // Some servers reject rename() when the target already exists. Move
+        // the old target aside first so a failed replacement can be restored.
+        await sftp.rename(remotePath, backupPath);
+        try {
+          await sftp.rename(temporaryPath, remotePath);
+        } catch (replaceError) {
+          try {
+            await sftp.rename(backupPath, remotePath);
+          } catch (restoreError) {
+            this.elog(pc.red(`${TAB_A}Could not restore previous upload target:`), restoreError?.message || restoreError);
+          }
+          throw replaceError;
+        }
+        try {
+          await sftp.delete(backupPath);
+        } catch (cleanupError) {
+          this.wlog(pc.yellow(`${TAB_A}Replacement succeeded but backup cleanup failed:`), cleanupError?.message || cleanupError);
+        }
+      }
+      this.activeResumeUploads.delete(rel);
+      await this._writeRecoveryState("running", "apply changes");
+    } catch (error) {
+      if (!this.activeResumeUploads.has(rel)) {
+        try {
+          await sftp.delete(temporaryPath);
+        } catch {
+          // The temporary path may not exist after a failed upload or rename.
+        }
+      }
+      throw error;
     }
   }
 
@@ -467,6 +556,9 @@ export class SftpPushSyncApp {
         status,
         phase,
         updatedAt: new Date().toISOString(),
+        ...(this.activeResumeUploads.size > 0
+          ? { resumeUploads: Object.fromEntries(this.activeResumeUploads) }
+          : {}),
         ...extra,
       };
       const tempPath = `${this.recoveryPath}.tmp`;
@@ -486,6 +578,56 @@ export class SftpPushSyncApp {
       if (error?.code !== "ENOENT") throw error;
     }
     this.recoveryState = null;
+  }
+
+  async _checkResumeSupport(sftp) {
+    const probeId = randomUUID();
+    const probePath = path.posix.join(
+      this.connection.remoteRoot,
+      `.sftp-push-sync-resume-probe-${probeId}.tmp`
+    );
+    const renamedPath = `${probePath}.renamed`;
+    const firstChunk = Buffer.from("sftp-push-sync-resume-");
+    const secondChunk = Buffer.from("probe");
+    const expected = Buffer.concat([firstChunk, secondChunk]);
+
+    this.log("");
+    this.log(pc.bold(pc.cyan("Resume capability check:")));
+    try {
+      await sftp.put(firstChunk, probePath);
+      await sftp.append(secondChunk, probePath);
+      const probeStat = await sftp.stat(probePath);
+      if (Number(probeStat.size) !== expected.length) {
+        throw new Error(`Unexpected appended file size: ${probeStat.size}`);
+      }
+
+      const content = await sftp.get(probePath);
+      if (!Buffer.from(content).equals(expected)) {
+        throw new Error("Appended file content does not match");
+      }
+
+      await sftp.rename(probePath, renamedPath);
+      const renamedContent = await sftp.get(renamedPath);
+      if (!Buffer.from(renamedContent).equals(expected)) {
+        throw new Error("Renamed file content does not match");
+      }
+
+      this.log(`${TAB_A}${pc.green("Append, remote size check, read-back, and rename: supported")}`);
+      this.log(`${TAB_A}Byte-level resume can be enabled for this server.`);
+      return true;
+    } catch (error) {
+      this.wlog(pc.yellow(`${TAB_A}Resume support unavailable:`), error?.message || error);
+      this.log(`${TAB_A}The sync will continue to use atomic full-file uploads.`);
+      return false;
+    } finally {
+      for (const filePath of [probePath, renamedPath]) {
+        try {
+          await sftp.delete(filePath);
+        } catch {
+          // Probe files may not exist after a failed write or rename.
+        }
+      }
+    }
   }
 
   _logPhaseMetrics() {
@@ -513,6 +655,7 @@ export class SftpPushSyncApp {
     let index = 0;
     let failedCount = 0;
     let completedBytes = 0;
+    const completedPaths = [];
     const workers = [];
     const actualWorkers = Math.max(1, Math.min(workerCount, total));
     const metricName = label.toLowerCase();
@@ -520,6 +663,7 @@ export class SftpPushSyncApp {
       task: label,
       completed: 0,
       total,
+      completedPaths: [],
     });
     this.progressMetrics.start(metricName);
 
@@ -615,6 +759,7 @@ export class SftpPushSyncApp {
 
         done += 1;
         completedBytes += Number(item?.local?.size || item?.size || 0);
+        if (item?.rel) completedPaths.push(item.rel);
         this.progressMetrics.update(metricName, {
           files: done,
           bytes: completedBytes,
@@ -625,6 +770,7 @@ export class SftpPushSyncApp {
             completed: done,
             total,
             failed: failedCount,
+            completedPaths,
           });
         }
         if (done === 1 || done % 10 === 0 || done === total) {
@@ -1074,6 +1220,7 @@ export class SftpPushSyncApp {
       runDownloadList = false,
       skipSync = false,
       sizeOnly = false,
+      checkResumeSupport = false,
       cliLogLevel = null,
       configPath,
     } = this.options;
@@ -1248,6 +1395,7 @@ export class SftpPushSyncApp {
     await this.logger.init();
 
     const previousRecovery = await this._loadRecoveryState();
+    this.previousRecovery = previousRecovery;
     if (previousRecovery?.status === "running" || previousRecovery?.status === "interrupted") {
       this.wlog(
         pc.yellow(
@@ -1369,6 +1517,12 @@ export class SftpPushSyncApp {
       }
 
       this.log(`${TAB_A}${pc.green("✔ Connected to SFTP.")}`);
+
+      if (checkResumeSupport) {
+        await this._checkResumeSupport(sftp);
+        await this._clearRecoveryState();
+        return;
+      }
 
       if (!skipSync && !fs.existsSync(this.connection.localRoot)) {
         this.elog(
@@ -1603,6 +1757,15 @@ export class SftpPushSyncApp {
         (sum, file) => sum + Number(file.local?.size || 0),
         0
       );
+      const currentPendingPaths = new Set([
+        ...toAdd.map((item) => item.rel),
+        ...toUpdate.map((item) => item.rel),
+        ...toDelete.map((item) => item.rel),
+      ]);
+      const previousCompletedPaths = new Set(previousRecovery?.completedPaths || []);
+      const resumedCount = previousRecovery?.status === "interrupted"
+        ? [...previousCompletedPaths].filter((rel) => !currentPendingPaths.has(rel)).length
+        : 0;
       this.log("");
       this.log(pc.bold(pc.cyan("Sync plan:")));
       this.log(`${TAB_A}Local : ${local.size} files, ${this._formatBytes(localBytes)}`);
@@ -1610,6 +1773,9 @@ export class SftpPushSyncApp {
       this.log(`${TAB_A}Changes: ${toAdd.length} add, ${toUpdate.length} update, ${toDelete.length} delete`);
       this.log(`${TAB_A}Upload size: ${this._formatBytes(plannedUploadBytes)}`);
       this.log(`${TAB_A}Effort: ${this._getWorkloadCategory({ toAdd, toUpdate, toDelete })}`);
+      if (resumedCount > 0) {
+        this.log(`${TAB_A}Resume: ${resumedCount} completed operations confirmed; not scheduled again.`);
+      }
       const workloadEstimate = this._getWorkloadEstimate({
         toAdd,
         toUpdate,
@@ -1812,6 +1978,7 @@ export class SftpPushSyncApp {
       this.log("");
       this.log(pc.bold(pc.green("✅ Sync complete.")));
       await this._clearRecoveryState();
+      this.previousRecovery = null;
     } catch (err) {
       await this._writeRecoveryState("failed", currentPhase, {
         error: err?.message || String(err),

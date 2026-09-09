@@ -46,23 +46,21 @@ function readRemoteFileWithProgress(sftp, remotePath, size, onProgress) {
   });
 }
 
-function createBatchJobs(batch, local, maxSizeForHash = Infinity) {
-  return batch.map((rel) => {
-    const meta = local.get(rel);
-    const size = meta?.size || 0;
-    return {
-      rel,
-      status: "queued",
-      receivedBytes: 0,
-      totalBytes: size,
-      isLarge: size >= maxSizeForHash,
-    };
-  });
+function createCompareJob(rel, local, maxSizeForHash = Infinity) {
+  const meta = local.get(rel);
+  const size = meta?.size || 0;
+  return {
+    rel,
+    status: "queued",
+    receivedBytes: 0,
+    totalBytes: size,
+    isLarge: size >= maxSizeForHash,
+  };
 }
 
 /**
  * Analysiert Unterschiede zwischen local- und remote-Maps.
- * Optimiert: Echtes Batch-Processing mit Concurrency-Limit.
+ * Optimiert: Worker-Pool mit Concurrency-Limit.
  *
  * Erwartete Struktur:
  *  local:  Map<rel, { rel, localPath, size, mtimeMs, isText? }>
@@ -152,7 +150,7 @@ export async function analyseDifferences({
     updateProgress("Analyse (quick): ", totalToCheck, totalToCheck, "done");
   }
 
-  // Phase 2: Content-Vergleich in echten Batches
+  // Phase 2: Content-Vergleich mit festen Worker-Slots
   // Nur für Dateien mit gleicher Size (und unter maxSizeForHash)
   const totalContentCompare = keysNeedContentCompare.length;
 
@@ -160,152 +158,137 @@ export async function analyseDifferences({
     log(`   → ${totalContentCompare} files need content comparison`);
   }
 
-  for (let i = 0; i < totalContentCompare; i += concurrency) {
-    const batch = keysNeedContentCompare.slice(i, i + concurrency);
-    const batchJobs = createBatchJobs(batch, local, maxSizeForHash);
-    const batchJobByRel = new Map(batchJobs.map((job) => [job.rel, job]));
+  if (totalContentCompare > 0) {
+    const activeJobs = Array.from({ length: Math.max(1, concurrency) }, () => null);
+    const compareResults = new Array(totalContentCompare).fill(null);
+    let nextIndex = 0;
+    let completed = 0;
 
-    const renderBatch = (force = false) => {
+    const renderActiveJobs = (force = false) => {
       if (!updateBatchProgress) return;
       updateBatchProgress({
-        current: Math.min(i, totalContentCompare),
+        current: completed,
         total: totalContentCompare,
-        jobs: batchJobs,
+        jobs: activeJobs.filter(Boolean),
         force,
       });
     };
 
-    renderBatch(true);
+    const compareOne = async (rel, job) => {
+      const l = local.get(rel);
+      const r = remote.get(rel);
+      const remotePath = path.posix.join(remoteRoot, rel);
 
-    const batchResults = await Promise.all(
-      batch.map(async (rel) => {
-        const l = local.get(rel);
-        const r = remote.get(rel);
-        const remotePath = path.posix.join(remoteRoot, rel);
-        const job = batchJobByRel.get(rel);
+      try {
+        if (l.isText) {
+          job.status = "text";
+          renderActiveJobs(true);
 
-        try {
-          if (l.isText) {
-            if (job) {
-              job.status = "text";
-              renderBatch(true);
-            }
-            // Text-Datei: vollständiger inhaltlicher Vergleich, mit kombiniertem
-            // Byte-Fortschritt aus lokalem Read + Remote-Download (statt 0→100 Sprung)
-            let localReceived = 0;
-            let remoteReceived = 0;
-            const combinedTotal = (l.size || 0) + (r.size || l.size || 0) || 1;
-            const updateCombined = () => {
-              if (!job) return;
-              job.receivedBytes = localReceived + remoteReceived;
-              job.totalBytes = combinedTotal;
-              renderBatch();
-            };
+          let localReceived = 0;
+          let remoteReceived = 0;
+          const combinedTotal = (l.size || 0) + (r.size || l.size || 0) || 1;
+          const updateCombined = () => {
+            job.receivedBytes = localReceived + remoteReceived;
+            job.totalBytes = combinedTotal;
+            renderActiveJobs();
+          };
 
-            const [localBuf, remoteBuf] = await Promise.all([
-              readLocalFileWithProgress(l.localPath, l.size, (received) => {
-                localReceived = received;
-                updateCombined();
-              }),
-              readRemoteFileWithProgress(sftp, r.remotePath, r.size || l.size, (received) => {
-                remoteReceived = received;
-                updateCombined();
-              }),
-            ]);
+          const [localBuf, remoteBuf] = await Promise.all([
+            readLocalFileWithProgress(l.localPath, l.size, (received) => {
+              localReceived = received;
+              updateCombined();
+            }),
+            readRemoteFileWithProgress(sftp, r.remotePath, r.size || l.size, (received) => {
+              remoteReceived = received;
+              updateCombined();
+            }),
+          ]);
 
-            const localStr = localBuf.toString("utf8");
-            const remoteStr = (
-              Buffer.isBuffer(remoteBuf) ? remoteBuf : Buffer.from(remoteBuf)
-            ).toString("utf8");
+          const localStr = localBuf.toString("utf8");
+          const remoteStr = (
+            Buffer.isBuffer(remoteBuf) ? remoteBuf : Buffer.from(remoteBuf)
+          ).toString("utf8");
 
-            const changed = localStr !== remoteStr;
-            if (job) {
-              job.status = changed ? "changed" : "done";
-              job.receivedBytes = l.size;
-              renderBatch(true);
-            }
+          const changed = localStr !== remoteStr;
+          job.status = changed ? "changed" : "done";
+          job.receivedBytes = job.totalBytes || combinedTotal;
+          renderActiveJobs(true);
 
-            return changed
-              ? { rel, local: l, remote: r, remotePath, changed: true }
-              : null;
-          } else {
-            // Binary: Hash-Vergleich mit Cache
-            if (!getLocalHash || !getRemoteHash) {
-              if (job) {
-                job.status = "changed";
-                renderBatch(true);
-              }
-              return { rel, local: l, remote: r, remotePath, changed: true };
-            }
-
-            if (job) {
-              job.status = "local";
-              renderBatch(true);
-            }
-
-            const [localHash, remoteHash] = await Promise.all([
-              getLocalHash(rel, l, (received, total) => {
-                if (!job) return;
-                job.status = "local";
-                job.receivedBytes = received;
-                job.totalBytes = total || l.size || 0;
-                renderBatch();
-              }),
-              getRemoteHash(rel, r, sftp, (received, total) => {
-                if (!job) return;
-                job.status = "remote";
-                job.receivedBytes = received;
-                job.totalBytes = total || r.size || 0;
-                renderBatch();
-              }),
-            ]);
-
-            const changed = localHash !== remoteHash;
-            if (job) {
-              job.status = changed ? "changed" : "done";
-              job.receivedBytes = l.size;
-              job.totalBytes = l.size;
-              renderBatch(true);
-            }
-
-            return changed
-              ? { rel, local: l, remote: r, remotePath, changed: true }
-              : null;
-          }
-        } catch (err) {
-          // Log the error so user can see what's happening
-          const errMsg = err?.message || String(err);
-          compareErrors.push({ rel, error: errMsg });
-          if (log) {
-            log(`   ⚠ Compare error for ${rel}: ${errMsg}`);
-          }
-          if (job) {
-            job.status = "error";
-            renderBatch(true);
-          }
-          // Mark as changed (sicherer) - file will be re-uploaded
-          return { rel, local: l, remote: r, remotePath, changed: true, hadError: true };
+          return changed
+            ? { rel, local: l, remote: r, remotePath, changed: true }
+            : null;
         }
-      })
-    );
 
-    // Ergebnisse sammeln
-    for (const result of batchResults) {
+        if (!getLocalHash || !getRemoteHash) {
+          job.status = "changed";
+          renderActiveJobs(true);
+          return { rel, local: l, remote: r, remotePath, changed: true };
+        }
+
+        job.status = "local";
+        renderActiveJobs(true);
+
+        const [localHash, remoteHash] = await Promise.all([
+          getLocalHash(rel, l, (received, total) => {
+            job.status = "local";
+            job.receivedBytes = received;
+            job.totalBytes = total || l.size || 0;
+            renderActiveJobs();
+          }),
+          getRemoteHash(rel, r, sftp, (received, total) => {
+            job.status = "remote";
+            job.receivedBytes = received;
+            job.totalBytes = total || r.size || 0;
+            renderActiveJobs();
+          }),
+        ]);
+
+        const changed = localHash !== remoteHash;
+        job.status = changed ? "changed" : "done";
+        job.receivedBytes = l.size;
+        job.totalBytes = l.size;
+        renderActiveJobs(true);
+
+        return changed
+          ? { rel, local: l, remote: r, remotePath, changed: true }
+          : null;
+      } catch (err) {
+        const errMsg = err?.message || String(err);
+        compareErrors.push({ rel, error: errMsg });
+        if (log) {
+          log(`   ⚠ Compare error for ${rel}: ${errMsg}`);
+        }
+        job.status = "error";
+        renderActiveJobs(true);
+        return { rel, local: l, remote: r, remotePath, changed: true, hadError: true };
+      }
+    };
+
+    const runWorker = async (slotIndex) => {
+      while (nextIndex < totalContentCompare) {
+        const currentIndex = nextIndex++;
+        const rel = keysNeedContentCompare[currentIndex];
+        const job = createCompareJob(rel, local, maxSizeForHash);
+
+        activeJobs[slotIndex] = job;
+        renderActiveJobs(true);
+
+        compareResults[currentIndex] = await compareOne(rel, job);
+        completed++;
+        renderActiveJobs(true);
+      }
+
+      activeJobs[slotIndex] = null;
+      renderActiveJobs(true);
+    };
+
+    renderActiveJobs(true);
+    await Promise.all(activeJobs.map((_, slotIndex) => runWorker(slotIndex)));
+
+    for (const result of compareResults) {
       if (result && result.changed) {
         toUpdate.push({ rel: result.rel, local: result.local, remote: result.remote, remotePath: result.remotePath });
       }
-    }
-
-    // Progress update - show as separate progress (doesn't jump back)
-    const progressCount = Math.min(i + batch.length, totalContentCompare);
-    if (updateBatchProgress) {
-      updateBatchProgress({
-        current: progressCount,
-        total: totalContentCompare,
-        jobs: batchJobs,
-        done: true,
-        force: true,
-      });
     }
   }
 

@@ -272,7 +272,7 @@ Note 2: Reliability and accuracy are more important to me than speed.
 
 ## Example Output
 
-![An console output example](images/example-output-002.jpg)
+![An console output example](images/sftp-push-sync-run-example.gif)
 
 ## Links
 

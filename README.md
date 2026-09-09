@@ -281,7 +281,7 @@ You can safely delete the local cache at any time. The first analysis will then 
 
 ## Example Output
 
-![An console output example](https://github.com/cnichte/sftp-push-sync/blob/main/images/sftp-push-sync-run-example.gif)
+![An console output example](https://github.com/cnichte/sftp-push-sync/blob/main/images/sftp-push-sync-run-example.mov)
 
 ## Links
 

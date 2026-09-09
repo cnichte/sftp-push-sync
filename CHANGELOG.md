@@ -8,7 +8,7 @@
   
 As each FTP server has different limits on the number of parallel requests it allows, you will need to determine the appropriate values by trial and error. The whole thing is backwards compatible: the `worker` property continues to work as workerUpload.
 
-What does this change achieve? Take 43,048 files, for example:
+What does this change achieve? Take 43048 files, for example:
 
 - 1 Worker Duration: 21:07 (1267.2s)
 - 5 Worker Duration: 9:17 (557.9s)
@@ -67,6 +67,6 @@ This is now taken into account with the option: `cleanupEmptyDirs`.
 
 ### Added
 
-- Separate `sidecar.localRoot` / `sidecar.remoteRoot` für Upload-/Download-Listen.
+- Separate `sidecar.localRoot` / `sidecar.remoteRoot` for Upload-/Download-Lists.
 
 ---

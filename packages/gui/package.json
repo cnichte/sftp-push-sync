@@ -1,6 +1,6 @@
 {
   "name": "@sftp-push-sync/gui",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "VeloSync desktop application for sftp-push-sync",
   "type": "module",
   "private": true,

@@ -66,3 +66,4 @@ run("npm", [
 run("git", ["add", "packages/gui/package.json", "package-lock.json"]);
 run("git", ["commit", "-m", `chore: release VeloSync ${newVersion}`], { stdio: "inherit" });
 execFileSync("node", ["scripts/release-tag.mjs"], { cwd: projectRoot, stdio: "inherit" });
+execFileSync("npm", ["run", "release:mac"], { cwd: projectRoot, stdio: "inherit" });

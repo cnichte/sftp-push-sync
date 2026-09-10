@@ -4,7 +4,7 @@
  * @author Carsten Nichte, 2025, https://carsten-nichte.de/
  * 
  */
-// src/helpers/directory.mjs
+// packages/core/src/helpers/directory.mjs
 import path from "path";
 
 /**

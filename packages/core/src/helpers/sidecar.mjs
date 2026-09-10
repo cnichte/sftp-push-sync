@@ -4,7 +4,7 @@
  * @author Carsten Nichte, 2025, https://carsten-nichte.de/
  * 
  */ 
-// src/helpers/sidecar.mjs
+// packages/core/src/helpers/sidecar.mjs
 import fs from "fs";
 import fsp from "fs/promises";
 import path from "path";

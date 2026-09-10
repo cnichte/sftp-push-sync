@@ -1,0 +1,16 @@
+{
+  "name": "@sftp-push-sync/core",
+  "version": "4.0.0",
+  "description": "Sync engine for sftp-push-sync (no CLI/process concerns)",
+  "type": "module",
+  "private": true,
+  "main": "src/index.mjs",
+  "dependencies": {
+    "cli-progress": "^3.12.0",
+    "cli-spinners": "^3.4.0",
+    "diff": "^8.0.2",
+    "minimatch": "^10.1.1",
+    "picocolors": "^1.1.1",
+    "ssh2-sftp-client": "^12.0.1"
+  }
+}

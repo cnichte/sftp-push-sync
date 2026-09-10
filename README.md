@@ -123,22 +123,24 @@ Create a `sync.config.json` in the root folder of your project:
 
 ```bash
 # Normal synchronisation
-node bin/sftp-push-sync.mjs staging
+node packages/cli/bin/sftp-push-sync.mjs staging
 
 # Normal synchronisation + sidecar upload list
-node bin/sftp-push-sync.mjs staging --sidecar-upload
+node packages/cli/bin/sftp-push-sync.mjs staging --sidecar-upload
 
 # Normal synchronisation + sidecar download list
-node bin/sftp-push-sync.mjs staging --sidecar-download
+node packages/cli/bin/sftp-push-sync.mjs staging --sidecar-download
 
 # Only sidecar lists, no standard synchronisation
-node bin/sftp-push-sync.mjs staging --skip-sync --sidecar-upload
-node bin/sftp-push-sync.mjs staging --skip-sync --sidecar-download
+node packages/cli/bin/sftp-push-sync.mjs staging --skip-sync --sidecar-upload
+node packages/cli/bin/sftp-push-sync.mjs staging --skip-sync --sidecar-download
 
 # (optional) only run lists dry
-node bin/sftp-push-sync.mjs staging --skip-sync --sidecar-upload --dry-run
+node packages/cli/bin/sftp-push-sync.mjs staging --skip-sync --sidecar-upload --dry-run
 ```
 
+- Can also be run globally after `npm install -g sftp-push-sync` (or locally via `npx sftp-push-sync`)
+  once installed from npm, since the `bin` entry resolves independently of this repo layout.
 - Can be conveniently started via the scripts in `package.json`:
 
 ```bash

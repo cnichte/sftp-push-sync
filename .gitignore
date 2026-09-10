@@ -1,5 +1,12 @@
 node_modules
+dist
+packages/gui/release
+
 README-dev.md
-DEBUG-LOG: Allgemein.md
 README-npm-publish.md
-TODO.md
+
+TODO-cli.md
+DEBUG-LOG-CLI.md
+
+TODO-GUI.md
+DEBUG-LOG-GUI.md

@@ -1,0 +1,24 @@
+{
+  "name": "sftp-push-sync",
+  "version": "4.0.0",
+  "description": "SFTP sync tool for my Hugo projects (local to remote, with hash cache)",
+  "type": "module",
+  "bin": {
+    "sftp-push-sync": "bin/sftp-push-sync.mjs"
+  },
+  "scripts": {
+    "build:noop": "echo \"nothing to build\""
+  },
+  "keywords": [
+    "hugo",
+    "sftp",
+    "deploy",
+    "sync"
+  ],
+  "author": "Carsten Nichte",
+  "license": "GPL-3.0-or-later",
+  "dependencies": {
+    "@sftp-push-sync/core": "*",
+    "picocolors": "^1.1.1"
+  }
+}

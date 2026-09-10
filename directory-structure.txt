@@ -1,18 +1,29 @@
-./src
+./packages
+├── cli
+│   ├── bin
+│   │   └── sftp-push-sync.mjs
+│   └── package.json
 ├── core
-│   ├── MultiLineProgressRenderer.mjs
-│   ├── ScanProgressController.mjs
-│   ├── SftpPushSyncApp.mjs
-│   ├── SimpleProgressBar.mjs
-│   └── SyncLogger.mjs
-└── helpers
-    ├── compare.mjs
-    ├── directory.mjs
-    ├── hash-cache-leveldb.mjs
-    ├── hash-cache-ndjson.mjs
-    ├── hashing.mjs
-    ├── progress-constants.mjs
-    ├── sidecar.mjs
-    └── walkers.mjs
+│   ├── package.json
+│   └── src
+│       ├── core
+│       │   ├── MultiLineProgressRenderer.mjs
+│       │   ├── ProgressMetrics.mjs
+│       │   ├── ScanProgressController.mjs
+│       │   ├── SftpPushSyncApp.mjs
+│       │   ├── SimpleProgressBar.mjs
+│       │   └── SyncLogger.mjs
+│       ├── helpers
+│       │   ├── compare.mjs
+│       │   ├── directory.mjs
+│       │   ├── hash-cache-leveldb.mjs
+│       │   ├── hash-cache-ndjson.mjs
+│       │   ├── hashing.mjs
+│       │   ├── progress-constants.mjs
+│       │   ├── sidecar.mjs
+│       │   └── walkers.mjs
+│       └── index.mjs
+└── gui
+    └── package.json
 
-3 directories, 13 files
+8 directories, 19 files

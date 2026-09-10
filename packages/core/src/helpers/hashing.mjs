@@ -4,7 +4,7 @@
  * @author Carsten Nichte, 2025, https://carsten-nichte.de/
  *
  */
-// src/helpers/hashing.mjs
+// packages/core/src/helpers/hashing.mjs
 import fs from "fs";
 import fsp from "fs/promises";
 import { createHash } from "crypto";

@@ -4,7 +4,7 @@
  * @author Carsten Nichte, 2025, https://carsten-nichte.de/
  *
  */
-// src/core/ScanProgressController.mjs
+// packages/core/src/core/ScanProgressController.mjs
 import cliSpinners from "cli-spinners";
 import pc from "picocolors";
 import { toPosix, shortenPathForProgress } from "../helpers/directory.mjs";

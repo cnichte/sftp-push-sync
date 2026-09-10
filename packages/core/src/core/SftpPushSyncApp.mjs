@@ -4,7 +4,7 @@
  * @author Carsten Nichte, 2025, https://carsten-nichte.de/
  *
  */
-// src/core/SftpPushSyncApp.mjs
+// packages/core/src/core/SftpPushSyncApp.mjs
 import fs from "fs";
 import fsp from "fs/promises";
 import { randomUUID } from "crypto";
@@ -37,6 +37,24 @@ import {
 
 const require = createRequire(import.meta.url);
 const pkg = require("../../package.json");
+
+// ---------------------------------------------------------------------------
+// Fehler bei ungültiger Konfiguration/Aufruf (kein Laufzeitfehler der Sync-Logik)
+// ---------------------------------------------------------------------------
+export class SftpPushSyncConfigError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "SftpPushSyncConfigError";
+  }
+}
+
+// Fallback-Logger, falls kein `onLog` übergeben wird (z.B. bei Direktnutzung
+// der Core-Library ohne CLI-Wrapper). Die CLI übergibt normalerweise ihren
+// eigenen Handler, damit Core keine Konsolen-Abhängigkeit erzwingt.
+function defaultOnLog(level, line) {
+  if (level === "error") console.error(line);
+  else console.log(line);
+}
 
 // Symbole & Format
 const ADD = pc.green("+");
@@ -97,6 +115,9 @@ export class SftpPushSyncApp {
    */
   constructor(options = {}) {
     this.options = options;
+
+    // Logging-Callback (Konsole ist Sache des Aufrufers, z.B. der CLI)
+    this.onLog = typeof options.onLog === "function" ? options.onLog : defaultOnLog;
 
     // Konfiguration
     this.configRaw = null;
@@ -168,30 +189,30 @@ export class SftpPushSyncApp {
     this.batchProgress?.stop();
   }
 
-  _consoleAndLog(prefixForFile, ...msg) {
+  _consoleAndLog(prefixForFile, level, ...msg) {
     this._clearProgressLine();
-    console.log(...msg);
     const line = msg
       .map((m) => (typeof m === "string" ? m : String(m)))
       .join(" ");
+    this.onLog(level, line);
     this._writeLogFile(prefixForFile ? prefixForFile + line : line);
   }
 
   log(...msg) {
-    this._consoleAndLog("", ...msg);
+    this._consoleAndLog("", "info", ...msg);
   }
 
   elog(...msg) {
-    this._consoleAndLog("[ERROR] ", ...msg);
+    this._consoleAndLog("[ERROR] ", "error", ...msg);
   }
 
   wlog(...msg) {
-    this._consoleAndLog("[WARN] ", ...msg);
+    this._consoleAndLog("[WARN] ", "warn", ...msg);
   }
 
   vlog(...msg) {
     if (!this.isVerbose) return;
-    this._consoleAndLog("", ...msg);
+    this._consoleAndLog("", "verbose", ...msg);
   }
 
   // ---------------------------------------------------------
@@ -455,11 +476,11 @@ export class SftpPushSyncApp {
     if (!process.stdout.isTTY) {
       if (total && total > 0) {
         const percent = ((current / total) * 100).toFixed(1);
-        console.log(
+        this.log(
           `${TAB_A}${prefix}${current}/${total} ${suffix} (${percent}%) – ${short}`
         );
       } else {
-        console.log(
+        this.log(
           `${TAB_A}${prefix}${current} ${suffix} – ${short}`
         );
       }
@@ -1193,26 +1214,6 @@ export class SftpPushSyncApp {
   async run() {
     const start = Date.now();
 
-    // Global error handlers to catch unexpected errors
-    const handleFatalError = (type, error) => {
-      const msg = error?.message || String(error);
-      const logMsg = `❌ FATAL ${type}: ${msg}`;
-      console.error(pc.red(logMsg));
-      if (this.logger) {
-        this.logger.writeLine(logMsg);
-        this.logger.writeLine(error?.stack || "No stack trace available");
-        this.logger.close();
-      }
-      process.exitCode = 1;
-    };
-
-    process.on('unhandledRejection', (reason) => {
-      handleFatalError('Unhandled Promise Rejection', reason);
-    });
-    process.on('uncaughtException', (error) => {
-      handleFatalError('Uncaught Exception', error);
-    });
-
     const {
       target,
       dryRun = false,
@@ -1223,17 +1224,16 @@ export class SftpPushSyncApp {
       checkResumeSupport = false,
       cliLogLevel = null,
       configPath,
+      version = pkg.version,
     } = this.options;
 
     if (!target) {
-      console.error(pc.red("❌ No target specified."));
-      process.exit(1);
+      throw new SftpPushSyncConfigError("No target specified.");
     }
 
     const cfgPath = path.resolve(configPath || "sync.config.json");
     if (!fs.existsSync(cfgPath)) {
-      console.error(pc.red(`❌ Configuration file missing: ${cfgPath}`));
-      process.exit(1);
+      throw new SftpPushSyncConfigError(`Configuration file missing: ${cfgPath}`);
     }
 
     // Config laden
@@ -1241,38 +1241,31 @@ export class SftpPushSyncApp {
     try {
       configRaw = JSON.parse(await fsp.readFile(cfgPath, "utf8"));
     } catch (err) {
-      console.error(
-        pc.red("❌ Error reading sync.config.json:"),
-        err?.message || err
+      throw new SftpPushSyncConfigError(
+        `Error reading sync.config.json: ${err?.message || err}`
       );
-      process.exit(1);
     }
 
     if (!configRaw.connections || typeof configRaw.connections !== "object") {
-      console.error(
-        pc.red("❌ sync.config.json must have a 'connections' field.")
+      throw new SftpPushSyncConfigError(
+        "sync.config.json must have a 'connections' field."
       );
-      process.exit(1);
     }
 
     const targetConfig = configRaw.connections[target];
     if (!targetConfig) {
-      console.error(
-        pc.red(`❌ Connection '${target}' not found in sync.config.json.`)
+      throw new SftpPushSyncConfigError(
+        `Connection '${target}' not found in sync.config.json.`
       );
-      process.exit(1);
     }
 
     const syncCfg = targetConfig.sync ?? targetConfig;
     const sidecarCfg = targetConfig.sidecar ?? {};
 
     if (!syncCfg.localRoot || !syncCfg.remoteRoot) {
-      console.error(
-        pc.red(
-          `❌ Connection '${target}' is missing sync.localRoot or sync.remoteRoot.`
-        )
+      throw new SftpPushSyncConfigError(
+        `Connection '${target}' is missing sync.localRoot or sync.remoteRoot.`
       );
-      process.exit(1);
     }
 
     this.configRaw = configRaw;
@@ -1376,13 +1369,13 @@ export class SftpPushSyncApp {
     // Migrate from old JSON cache if exists
     const migration = await migrateFromJsonCache(oldJsonCachePath, ndjsonCachePath, target);
     if (migration.migrated) {
-      console.log(pc.green(`   ✔ Migrated ${migration.localCount + migration.remoteCount} cache entries from JSON to NDJSON`));
+      this.log(pc.green(`   ✔ Migrated ${migration.localCount + migration.remoteCount} cache entries from JSON to NDJSON`));
     }
 
     this.hashCache = await createHashCacheNDJSON({
       cachePath: ndjsonCachePath,
       namespace: target,
-      vlog: this.isVerbose ? (...m) => console.log(...m) : null,
+      vlog: this.isVerbose ? (...m) => this.vlog(...m) : null,
     });
 
     // Logger
@@ -1410,7 +1403,7 @@ export class SftpPushSyncApp {
     this.log("\n" + hr2());
     this.log(
       pc.bold(
-        `🔐 SFTP Push-Synchronisation: sftp-push-sync  v${pkg.version}`
+        `🔐 SFTP Push-Synchronisation: sftp-push-sync  v${version}`
       )
     );
     this.log(`${TAB_A}LogLevel: ${this.logLevel}${this.logTimestamps ? " (timestamps enabled)" : ""}`);
@@ -1455,21 +1448,23 @@ export class SftpPushSyncApp {
 
     const sftp = new SftpClient();
     let connected = false;
+    let aborted = false;
 
-    // Graceful shutdown on SIGINT/SIGTERM (e.g. Ctrl+C or a debugger detaching
-    // and killing the process): save the hash cache and close the SFTP
-    // connection instead of dying mid-flight and losing progress/leaving the
-    // connection open.
-    let shuttingDown = false;
+    // Graceful shutdown when the run is aborted from outside (e.g. the CLI
+    // wiring SIGINT/SIGTERM to an AbortController). Core itself no longer
+    // registers process signal handlers — the caller decides how and when
+    // to request a shutdown via `options.signal` (an AbortSignal).
     let currentPhase = "connecting";
-    const handleShutdownSignal = async (signal) => {
-      if (shuttingDown) return;
-      shuttingDown = true;
-      await this._writeRecoveryState("interrupted", currentPhase, { signal }).catch(() => {});
+    const abortSignal = this.options.signal;
+    const handleShutdownSignal = async () => {
+      if (aborted) return;
+      aborted = true;
+      const reason = abortSignal?.reason || "abort";
+      await this._writeRecoveryState("interrupted", currentPhase, { reason: String(reason) }).catch(() => {});
       this.progressBar?.stop();
       this.batchProgress?.stop();
       this.log("");
-      this.wlog(pc.yellow(`⚠ Received ${signal}, shutting down gracefully…`));
+      this.wlog(pc.yellow(`⚠ Shutdown requested (${reason}), shutting down gracefully…`));
       this.log(`${TAB_A}Last active phase: ${pc.cyan(currentPhase)}`);
       this.log(`${TAB_A}No new file operations will be started.`);
       try {
@@ -1483,17 +1478,20 @@ export class SftpPushSyncApp {
       } catch (e) {
         this.vlog(`${TAB_A}${pc.dim(`SFTP close during shutdown failed: ${e?.message || e}`)}`);
       }
-      if (this.logger) this.logger.close();
-      process.exit(130);
     };
-    process.once("SIGINT", handleShutdownSignal);
-    process.once("SIGTERM", handleShutdownSignal);
+    if (abortSignal && !abortSignal.aborted) {
+      abortSignal.addEventListener("abort", handleShutdownSignal, { once: true });
+    }
 
     let toAdd = [];
     let toUpdate = [];
     let toDelete = [];
 
     try {
+      if (abortSignal?.aborted) {
+        aborted = true;
+        throw new Error("Sync aborted before start.");
+      }
       this.log("");
       this.log(pc.cyan("🔌 Connecting to SFTP server …"));
       await sftp.connect({
@@ -1521,15 +1519,13 @@ export class SftpPushSyncApp {
       if (checkResumeSupport) {
         await this._checkResumeSupport(sftp);
         await this._clearRecoveryState();
-        return;
+        return { ok: true, exitCode: 0 };
       }
 
       if (!skipSync && !fs.existsSync(this.connection.localRoot)) {
-        this.elog(
-          pc.red("❌ Local root does not exist:"),
-          this.connection.localRoot
+        throw new SftpPushSyncConfigError(
+          `Local root does not exist: ${this.connection.localRoot}`
         );
-        process.exit(1);
       }
 
       // Bypass-Only?
@@ -1554,7 +1550,7 @@ export class SftpPushSyncApp {
         this.log(pc.bold(pc.cyan("📊 Summary (bypass only):")));
         this.log(`${TAB_A}Duration: ${pc.green(durationFormatted)} (${durationSec.toFixed(1)}s)`);
         await this._clearRecoveryState();
-        return;
+        return { ok: true, exitCode: 0 };
       }
 
       // Phase 1 + 2 – Scan
@@ -1963,13 +1959,13 @@ export class SftpPushSyncApp {
         this.log("📄 Changes:");
         [...toAdd.map((t) => t.rel)]
           .sort()
-          .forEach((f) => console.log(`${TAB_A}${ADD} ${f}`));
+          .forEach((f) => this.log(`${TAB_A}${ADD} ${f}`));
         [...toUpdate.map((t) => t.rel)]
           .sort()
-          .forEach((f) => console.log(`${TAB_A}${CHA} ${f}`));
+          .forEach((f) => this.log(`${TAB_A}${CHA} ${f}`));
         [...toDelete.map((t) => t.rel)]
           .sort()
-          .forEach((f) => console.log(`${TAB_A}${DEL} ${f}`));
+          .forEach((f) => this.log(`${TAB_A}${DEL} ${f}`));
       } else {
         this.log("");
         this.log("No changes.");
@@ -1979,8 +1975,9 @@ export class SftpPushSyncApp {
       this.log(pc.bold(pc.green("✅ Sync complete.")));
       await this._clearRecoveryState();
       this.previousRecovery = null;
+      return { ok: true, exitCode: 0 };
     } catch (err) {
-      await this._writeRecoveryState("failed", currentPhase, {
+      await this._writeRecoveryState(aborted ? "interrupted" : "failed", currentPhase, {
         error: err?.message || String(err),
       }).catch(() => {});
       const hint = describeSftpError(err);
@@ -1989,9 +1986,8 @@ export class SftpPushSyncApp {
         this.wlog(pc.yellow(`${TAB_A}Possible cause:`), hint);
       }
       if (this.isVerbose) {
-        console.error(err);
+        this.elog(err?.stack || String(err));
       }
-      process.exitCode = 1;
       try {
         // falls hashCache existiert, Cache schließen
         if (this.hashCache?.close) {
@@ -2003,9 +1999,15 @@ export class SftpPushSyncApp {
           this.vlog(`${TAB_A}${pc.dim(`Cache close during cleanup failed: ${e?.message || e}`)}`)
         }
       }
+      return {
+        ok: false,
+        exitCode: aborted ? 130 : 1,
+        error: err,
+      };
     } finally {
-      process.removeListener("SIGINT", handleShutdownSignal);
-      process.removeListener("SIGTERM", handleShutdownSignal);
+      if (abortSignal) {
+        abortSignal.removeEventListener("abort", handleShutdownSignal);
+      }
 
       try {
         if (connected) {

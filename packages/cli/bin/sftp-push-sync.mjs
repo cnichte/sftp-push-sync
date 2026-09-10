@@ -36,8 +36,12 @@
  * or the file has the extension .mjs.
  */
 // bin/sftp-push-sync.mjs
+import { createRequire } from "module";
 import pc from "picocolors";
-import { SftpPushSyncApp } from "../src/core/SftpPushSyncApp.mjs";
+import { SftpPushSyncApp } from "@sftp-push-sync/core";
+
+const require = createRequire(import.meta.url);
+const pkg = require("../package.json");
 
 // ---------------------------------------------------------------------------
 // CLI-Arguments
@@ -82,6 +86,7 @@ let RUN_DOWNLOAD_LIST = false;
 let SKIP_SYNC = false;
 let SIZE_ONLY = false;
 let CHECK_RESUME_SUPPORT = false;
+let JSON_MODE = false;
 let cliLogLevel = null;
 let configPath = undefined;
 
@@ -114,6 +119,9 @@ for (let i = 0; i < rest.length; i += 1) {
       break;
     case "--laconic":
       cliLogLevel = "laconic";
+      break;
+    case "--json":
+      JSON_MODE = true;
       break;
     case "--config":
     case "-c": {
@@ -176,6 +184,9 @@ function printUsage() {
   console.log("                       Show all scan workers and detailed progress");
   console.log("  --laconic           Minimal logging (overrides verbose)");
   console.log(
+    "  --json              Emit newline-delimited JSON events instead of formatted text"
+  );
+  console.log(
     "  --config, -c <file> Use custom config file (default: ./sync.config.json)"
   );
   console.log("  --help, -h          Show this help");
@@ -188,6 +199,14 @@ function printUsage() {
 // ---------------------------------------------------------------------------
 
 async function main() {
+  // SIGINT/SIGTERM are a CLI/process concern; the core only reacts to an
+  // AbortSignal so it stays reusable outside a single-process CLI (e.g. a
+  // GUI running jobs as child processes).
+  const controller = new AbortController();
+  const requestShutdown = (signal) => controller.abort(signal);
+  process.once("SIGINT", () => requestShutdown("SIGINT"));
+  process.once("SIGTERM", () => requestShutdown("SIGTERM"));
+
   const app = new SftpPushSyncApp({
     target: TARGET,
     dryRun: DRY_RUN,
@@ -198,15 +217,42 @@ async function main() {
     checkResumeSupport: CHECK_RESUME_SUPPORT,
     cliLogLevel,
     configPath,
+    version: pkg.version,
+    signal: controller.signal,
+    onLog: (level, line) => {
+      if (JSON_MODE) {
+        const payload = JSON.stringify({ type: "log", level, line, ts: Date.now() });
+        if (level === "error") console.error(payload);
+        else console.log(payload);
+        return;
+      }
+      if (level === "error") console.error(line);
+      else console.log(line);
+    },
   });
 
-  await app.run();
+  const result = await app.run();
+  if (JSON_MODE) {
+    console.log(
+      JSON.stringify({ type: "result", ok: result?.ok ?? false, exitCode: result?.exitCode ?? 0 })
+    );
+  }
+  if (result && !result.ok) {
+    process.exitCode = result.exitCode ?? 1;
+  }
 }
 
 main().catch((err) => {
+  if (JSON_MODE) {
+    console.error(
+      JSON.stringify({ type: "result", ok: false, exitCode: 1, error: err?.message || String(err) })
+    );
+    process.exitCode = 1;
+    return;
+  }
   console.error(pc.red("❌ Unhandled error in sftp-push-sync:"), err?.message || err);
   if (process.env.DEBUG) {
     console.error(err);
   }
-  process.exit(1);
+  process.exitCode = 1;
 });

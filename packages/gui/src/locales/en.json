@@ -1,0 +1,92 @@
+{
+  "app": {
+    "title": "VeloSync"
+  },
+  "toolbar": {
+    "newJob": "New job",
+    "settings": "Settings",
+    "about": "About",
+    "updateAvailable": "Update available"
+  },
+  "sidebar": {
+    "connectionsTitle": "Connections",
+    "addConfig": "Import existing sync.config.json",
+    "dropHint": "Drop a sync.config.json here or use the folder icon above to import one."
+  },
+  "tabs": {
+    "empty": "No jobs running. Start one from the connections list."
+  },
+  "jobs": {
+    "start": "Start",
+    "stop": "Stop",
+    "close": "Close tab",
+    "status": {
+      "running": "running",
+      "done": "done",
+      "failed": "failed",
+      "aborted": "aborted"
+    },
+    "conflictSameConnection": "This connection is already running.",
+    "conflictOverlapLocal": "Local folder overlaps with running connection \"{{name}}\": {{path}}",
+    "conflictOverlapRemote": "Remote folder overlaps with running connection \"{{name}}\": {{path}}"
+  },
+  "properties": {
+    "title": "Properties",
+    "empty": "Select a connection to see its properties.",
+    "lockedWhileRunning": "This job is running — properties are read-only until it finishes.",
+    "groupConnection": "Connection",
+    "groupSync": "Sync",
+    "groupSidecar": "Sidecar",
+    "description": "Description",
+    "host": "Host",
+    "port": "Port",
+    "user": "User",
+    "password": "Password",
+    "workerUpload": "Upload workers",
+    "workerList": "Listing workers",
+    "localRoot": "Local root",
+    "remoteRoot": "Remote root",
+    "sidecarLocalRoot": "Sidecar local root",
+    "sidecarRemoteRoot": "Sidecar remote root",
+    "sidecarUploadList": "Sidecar upload list",
+    "sidecarDownloadList": "Sidecar download list",
+    "commaSeparated": "Comma-separated file paths",
+    "save": "Save",
+    "revealInFolder": "Show in Finder"
+  },
+  "settings": {
+    "title": "Settings",
+    "general": "General",
+    "updates": "Updates",
+    "language": "Language",
+    "currentVersion": "Current version",
+    "status": "Status",
+    "updateStatus": {
+      "idle": "up to date",
+      "checking": "checking…",
+      "available": "update available",
+      "downloading": "downloading…",
+      "downloaded": "ready to install",
+      "error": "error",
+      "not-available": "up to date"
+    },
+    "newVersionAvailable": "Version {{version}} is available.",
+    "checkForUpdates": "Check for updates",
+    "downloadUpdate": "Download update",
+    "restartAndInstall": "Restart & install"
+  },
+  "about": {
+    "title": "About",
+    "description": "SFTP push synchronization"
+  },
+  "newJob": {
+    "title": "New job",
+    "target": "Project (sync.config.json)",
+    "newFile": "New project (choose location)…",
+    "chooseLocation": "Choose location…",
+    "noLocationChosen": "No location chosen yet",
+    "name": "Connection name",
+    "missingFields": "Please choose a location and enter a connection name.",
+    "create": "Create"
+  }
+}

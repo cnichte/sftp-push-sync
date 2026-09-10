@@ -1,5 +1,9 @@
 # Changelog
 
+## [unpublished]
+
+- UI Introduction. Will run on MacOS, Linux and Windows.
+
 ## [4.0.0] - 2026-09-10
 
 With version `4.0.0`, the app is ‘feature complete’, unless I can think of any new features. From now on, there will only be bug fixes.

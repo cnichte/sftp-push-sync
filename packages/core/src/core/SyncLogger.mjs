@@ -3,7 +3,7 @@
  *
  * @author Carsten Nichte, 2025, https://carsten-nichte.de/
  */
-// src/core/SyncLogger.mjs
+// packages/core/src/core/SyncLogger.mjs
 import fs from "fs";
 import fsp from "fs/promises";
 import path from "path";

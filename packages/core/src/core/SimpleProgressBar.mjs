@@ -7,7 +7,7 @@
  * @author Carsten Nichte, 2025, https://carsten-nichte.de/
  *
  */
-// src/core/SimpleProgressBar.mjs
+// packages/core/src/core/SimpleProgressBar.mjs
 import cliProgress from "cli-progress";
 import { shortenPathForProgress } from "../helpers/directory.mjs";
 

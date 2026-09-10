@@ -2,6 +2,8 @@
 
 ## [4.0.0] - 2026-09-10
 
+With version `4.0.0`, the app is ‘feature complete’, unless I can think of any new features. From now on, there will only be bug fixes.
+
 - Progress output now includes phase durations, rates, ETA, workload estimates, and cache hit statistics.
 - Graceful shutdown persists a per-target recovery state with the last active phase and task progress.
 - A subsequent run reports interrupted state and safely re-checks affected files instead of skipping them blindly.

@@ -8,7 +8,7 @@ Implements a push syncronisation with Dry-Run. Performs the following tasks:
 
 Why?
 
-Reliability was mega important to me, so that for example  no orphaned documents are left on the server and only the parts that have changed are actually updated.
+Reliability was mega important to me, so that for example no orphaned documents are left on the server and only the parts that have realy changed are actually updated, not more note less.
 
 - I use the script to transfer [Hugo websites](https://gohugo.io) to the server.
 - This is part of the [Hugo-Toolbox](https://www.npmjs.com/package/hugo-toolbox).
@@ -31,7 +31,7 @@ The file `sftp-push-sync.mjs` is pure JavaScript (ESM). Node.js can execute it d
 
 ## News
 
-- Latest Version: `4.0.0` - Damit ist er "Feature Complete".
+- With version `4.0.0`, the app is ‘feature complete’, unless I can think of any new features. From now on, there will only be bug fixes.
 - I’ve improved the loading-bar and made tons of stability, performance improvements in the latest Updates, [see also CHANGELOG.md](https://github.com/cnichte/sftp-push-sync/blob/main/CHANGELOG.md).
 
 ### Breaking changes in 3.0.0
@@ -238,9 +238,15 @@ Use `--size-only` only when matching file sizes are sufficient for your workflow
 
 If a run is interrupted, a target-specific `.sync-recovery.<target>.json` file records the last active phase, task progress, and completed paths. The next run reports this state and re-checks affected files safely. Paths confirmed by the fresh comparison are not scheduled again. Recovery data is removed after a successful sync; it does not cause files to be skipped blindly.
 
-This includes byte-level continuation of a partially uploaded temporary file when the target server supports it.
+This includes byte-level continuation of a partially uploaded temporary file when the target server supports it:
 
-Run `sftp-push-sync <target> --check-resume-support` to test append, remote-size verification, read-back, and rename support on a target server. The check uses uniquely named temporary files below the configured remote root and removes them afterwards. It does not run a sync.
+- Run `sftp-push-sync <target> --check-resume-support` to test on a target server:
+  - `append`
+  - `remote-size verification`
+  - `read-back`
+  - `rename support`
+
+The check uses uniquely named temporary files below the configured remote root and removes them afterwards. It does not run a sync.
 
 When this capability check passes, an interrupted upload keeps its own temporary remote file. The next run verifies its saved target path, expected local size, and actual remote size before uploading only the remaining bytes. Missing, oversized, or inconsistent temporary files automatically fall back to a complete atomic upload.
 

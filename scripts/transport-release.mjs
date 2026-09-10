@@ -8,26 +8,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
 const sourceDir = path.join(projectRoot, "packages", "gui", "release");
 const targetDir = "/Users/cnichte/develop-software/01-active/webseiten/carsten-nichte.de/production/carsten-nichte.de/static/releases/velosync-app";
-const publishableExtensions = new Set([".dmg", ".zip", ".blockmap"]);
 const updaterMetadata = new Set(["latest-mac.yml", "latest-linux.yml"]);
 
 const entries = await readdir(sourceDir, { withFileTypes: true });
-const artifacts = [];
-
-for (const entry of entries) {
-  if (!entry.isFile() || entry.name.startsWith(".")) continue;
-  if (!publishableExtensions.has(path.extname(entry.name)) && !updaterMetadata.has(entry.name)) continue;
-
-  const sourcePath = path.join(sourceDir, entry.name);
-  if ((await stat(sourcePath)).size === 0) continue;
-  artifacts.push(entry.name);
-}
-
-if (artifacts.length === 0) {
-  throw new Error(`Keine Release-Artefakte in ${sourceDir} gefunden.`);
-}
-
-const metadataName = artifacts.find((name) => updaterMetadata.has(name));
+const metadataName = entries.find((entry) => entry.isFile() && updaterMetadata.has(entry.name))?.name;
 if (!metadataName) {
   throw new Error("Keine Updater-Metadatei (latest-mac.yml oder latest-linux.yml) gefunden.");
 }
@@ -39,19 +23,30 @@ if (!version) {
 }
 
 const platform = metadataName === "latest-mac.yml" ? "macos" : "linux";
+const artifactNames = [...metadata.matchAll(/^\s*-\s+url:\s*([^\s]+)$/gm)]
+  .map(([, url]) => path.basename(url))
+  .flatMap((fileName) => [fileName, `${fileName}.blockmap`]);
+const artifacts = [];
+for (const artifact of artifactNames) {
+  const sourcePath = path.join(sourceDir, artifact);
+  try {
+    if ((await stat(sourcePath)).size > 0) artifacts.push(artifact);
+  } catch {
+    if (!artifact.endsWith(".blockmap")) throw new Error(`Release-Artefakt fehlt: ${sourcePath}`);
+  }
+}
 const architecture = artifacts.some((name) => name.includes("arm64")) ? "arm64" : "x64";
 const artifactDir = path.join(targetDir, `v${version}`, `${platform}-${architecture}`);
 const artifactPrefix = `v${version}/${platform}-${architecture}/`;
 
 await mkdir(targetDir, { recursive: true });
+await rm(artifactDir, { recursive: true, force: true });
 await mkdir(artifactDir, { recursive: true });
 for (const fileName of ["builder-debug.yml", "builder-effective-config.yaml"]) {
   await rm(path.join(targetDir, fileName), { force: true });
 }
 for (const artifact of artifacts) {
-  if (updaterMetadata.has(artifact)) continue;
   await copyFile(path.join(sourceDir, artifact), path.join(artifactDir, artifact));
-  await rm(path.join(targetDir, artifact), { force: true });
   console.log(`[kopiert] ${artifactPrefix}${artifact}`);
 }
 

@@ -10,6 +10,7 @@ const projectRoot = path.resolve(__dirname, "..");
 const typeIndex = process.argv.indexOf("--type");
 const releaseType = typeIndex === -1 ? "" : process.argv[typeIndex + 1];
 const dryRun = process.argv.includes("--dry-run");
+const allowDirty = process.argv.includes("--allow-dirty");
 const validTypes = new Set(["patch", "minor", "major"]);
 
 if (process.argv.includes("--help") || process.argv.includes("-h")) {
@@ -44,7 +45,7 @@ const guiPackagePath = path.join(projectRoot, "packages", "gui", "package.json")
 const currentVersion = JSON.parse(await readFile(guiPackagePath, "utf8")).version;
 const newVersion = nextVersion(currentVersion);
 const changes = run("git", ["status", "--porcelain"]);
-if (changes) {
+if (changes && !allowDirty) {
   throw new Error("Arbeitsbaum ist nicht sauber. Bitte alle Release-Änderungen zuerst committen.");
 }
 
@@ -65,5 +66,8 @@ run("npm", [
 ], { stdio: "inherit" });
 run("git", ["add", "packages/gui/package.json", "package-lock.json"]);
 run("git", ["commit", "-m", `chore: release VeloSync ${newVersion}`], { stdio: "inherit" });
-execFileSync("node", ["scripts/release-tag.mjs"], { cwd: projectRoot, stdio: "inherit" });
+execFileSync("node", ["scripts/release-tag.mjs", ...(allowDirty ? ["--allow-dirty"] : [])], {
+  cwd: projectRoot,
+  stdio: "inherit",
+});
 execFileSync("npm", ["run", "release:mac"], { cwd: projectRoot, stdio: "inherit" });

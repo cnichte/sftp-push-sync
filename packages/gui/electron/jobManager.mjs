@@ -1,10 +1,13 @@
 // packages/gui/electron/jobManager.mjs
 import pty from "node-pty";
+import { app } from "electron";
 import path from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const CLI_BIN = path.resolve(__dirname, "../../cli/bin/sftp-push-sync.mjs");
+const CLI_BIN = app.isPackaged
+  ? path.join(process.resourcesPath, "app.asar", "node_modules", "sftp-push-sync", "bin", "sftp-push-sync.mjs")
+  : path.resolve(__dirname, "../../cli/bin/sftp-push-sync.mjs");
 
 // Läuft im Main-Prozess: eine Registry laufender Jobs nach Connection-ID.
 // Eine ID ist `${configPath}::${name}` — der Name allein ist keine sichere

@@ -8,9 +8,10 @@ import { execFileSync } from "node:child_process";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
 const dryRun = process.argv.includes("--dry-run");
+const allowDirty = process.argv.includes("--allow-dirty");
 
 if (process.argv.includes("--help") || process.argv.includes("-h")) {
-  console.log("Usage: npm run release:tag [-- --dry-run]");
+  console.log("Usage: npm run release:tag [-- --dry-run] [--allow-dirty]");
   console.log("Creates and pushes v<GUI version>, which starts the Linux release workflow.");
   process.exit(0);
 }
@@ -32,7 +33,7 @@ if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) {
 
 const tag = `v${version}`;
 const changes = git(["status", "--porcelain"]);
-if (changes) {
+if (changes && !allowDirty) {
   throw new Error("Arbeitsbaum ist nicht sauber. Bitte alle Release-Änderungen zuerst committen.");
 }
 
@@ -51,6 +52,10 @@ if (remoteTag) {
 if (dryRun) {
   console.log(`[dry-run] Würde annotierten Tag ${tag} erstellen und nach origin pushen.`);
   process.exit(0);
+}
+
+if (changes) {
+  console.warn("Warnung: Tag wird trotz lokaler Änderungen erstellt; diese Änderungen sind nicht Teil des Tags.");
 }
 
 git(["tag", "-a", tag, "-m", `VeloSync ${version}`]);

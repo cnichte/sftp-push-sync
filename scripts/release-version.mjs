@@ -22,11 +22,12 @@ if (!validTypes.has(releaseType)) {
 }
 
 function run(command, args, options = {}) {
-  return execFileSync(command, args, {
+  const output = execFileSync(command, args, {
     cwd: projectRoot,
     encoding: "utf8",
     stdio: options.stdio || ["ignore", "pipe", "pipe"],
-  }).trim();
+  });
+  return output?.trim() || "";
 }
 
 function nextVersion(currentVersion) {

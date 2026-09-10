@@ -230,7 +230,7 @@ The normal progress view stays compact and shows up to three active remote-listi
 
 For change lists with more than 20 added or updated files, normal mode prints a count instead of every path. Use `--verbose` when the complete file list is needed.
 
-After scanning and comparing, the sync plan reports local and remote file counts, planned changes, upload size, workload category, and a rough transfer-time range. The estimate is intentionally a band rather than an exact ETA because server latency and connection quality can dominate the actual duration.
+After scanning and comparing, the sync plan reports local and remote file counts, planned changes, upload size, workload category, and a rough transfer-time range. The estimate is intentionally a band rather than an exact ETA (Estimated Time of Arrival) because server latency and connection quality can dominate the actual duration.
 
 During operations, progress bars show the current rate and ETA where a total is known. Counters, ETA, rate, state, and compare-phase fields reserve fixed display widths so terminal lines do not shift while values change. Large binary comparisons additionally show a per-file MB/s rate. The final summary includes completed phase durations and identifies the slowest phase.
 

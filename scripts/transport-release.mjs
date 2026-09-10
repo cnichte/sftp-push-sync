@@ -9,35 +9,38 @@ const projectRoot = path.resolve(__dirname, "..");
 const sourceDir = path.join(projectRoot, "packages", "gui", "release");
 const targetDir = "/Users/cnichte/develop-software/01-active/webseiten/carsten-nichte.de/production/carsten-nichte.de/static/releases/velosync-app";
 const updaterMetadata = new Set(["latest-mac.yml", "latest-linux.yml"]);
+const platformArg = process.argv.find((argument) => argument.startsWith("--platform="));
+const requestedPlatform = platformArg?.split("=", 2)[1];
+const metadataByPlatform = { macos: "latest-mac.yml", linux: "latest-linux.yml" };
 
-const entries = await readdir(sourceDir, { withFileTypes: true });
-const metadataName = entries.find((entry) => entry.isFile() && updaterMetadata.has(entry.name))?.name;
-if (!metadataName) {
-  throw new Error("Keine Updater-Metadatei (latest-mac.yml oder latest-linux.yml) gefunden.");
+if (requestedPlatform && !metadataByPlatform[requestedPlatform]) {
+  throw new Error("--platform muss macos oder linux sein.");
 }
 
-const metadata = await readFile(path.join(sourceDir, metadataName), "utf8");
+if (!requestedPlatform) throw new Error("--platform=macos oder --platform=linux ist erforderlich.");
+const metadataName = metadataByPlatform[requestedPlatform];
+const versionEntries = (await readdir(sourceDir, { withFileTypes: true }))
+  .filter((entry) => entry.isDirectory() && /^v\d+\.\d+\.\d+/.test(entry.name))
+  .map((entry) => entry.name)
+  .sort((left, right) => right.localeCompare(left, undefined, { numeric: true }));
+const platformDirectories = await Promise.all(versionEntries.map(async (versionDirectory) => {
+  const directory = path.join(sourceDir, versionDirectory);
+  const entries = await readdir(directory, { withFileTypes: true });
+  return entries
+    .filter((entry) => entry.isDirectory() && entry.name.startsWith(`${requestedPlatform}-`))
+    .map((entry) => path.join(directory, entry.name));
+}));
+const sourceArtifactDir = platformDirectories.flat()[0];
+if (!sourceArtifactDir) throw new Error(`Kein gestagter ${requestedPlatform}-Release gefunden.`);
+const metadata = await readFile(path.join(sourceArtifactDir, metadataName), "utf8");
 const version = metadata.match(/^version:\s*([^\s]+)/m)?.[1];
-if (!version) {
-  throw new Error(`Version in ${metadataName} nicht gefunden.`);
-}
+const architecture = path.basename(sourceArtifactDir).replace(`${requestedPlatform}-`, "");
+const artifactDir = path.join(targetDir, `v${version}`, `${requestedPlatform}-${architecture}`);
+const artifactPrefix = `v${version}/${requestedPlatform}-${architecture}/`;
 
-const platform = metadataName === "latest-mac.yml" ? "macos" : "linux";
-const artifactNames = [...metadata.matchAll(/^\s*-\s+url:\s*([^\s]+)$/gm)]
-  .map(([, url]) => path.basename(url))
-  .flatMap((fileName) => [fileName, `${fileName}.blockmap`]);
-const artifacts = [];
-for (const artifact of artifactNames) {
-  const sourcePath = path.join(sourceDir, artifact);
-  try {
-    if ((await stat(sourcePath)).size > 0) artifacts.push(artifact);
-  } catch {
-    if (!artifact.endsWith(".blockmap")) throw new Error(`Release-Artefakt fehlt: ${sourcePath}`);
-  }
-}
-const architecture = artifacts.some((name) => name.includes("arm64")) ? "arm64" : "x64";
-const artifactDir = path.join(targetDir, `v${version}`, `${platform}-${architecture}`);
-const artifactPrefix = `v${version}/${platform}-${architecture}/`;
+const artifacts = (await readdir(sourceArtifactDir, { withFileTypes: true }))
+  .filter((entry) => entry.isFile() && entry.name !== metadataName)
+  .map((entry) => entry.name);
 
 await mkdir(targetDir, { recursive: true });
 await rm(artifactDir, { recursive: true, force: true });
@@ -46,7 +49,7 @@ for (const fileName of ["builder-debug.yml", "builder-effective-config.yaml"]) {
   await rm(path.join(targetDir, fileName), { force: true });
 }
 for (const artifact of artifacts) {
-  await copyFile(path.join(sourceDir, artifact), path.join(artifactDir, artifact));
+  await copyFile(path.join(sourceArtifactDir, artifact), path.join(artifactDir, artifact));
   console.log(`[kopiert] ${artifactPrefix}${artifact}`);
 }
 

@@ -14,7 +14,8 @@
     "build:renderer": "vite build",
     "postinstall": "electron-rebuild -f -w node-pty",
     "dist": "npm run build:renderer && electron-builder",
-    "dist:mac-arm": "npm run build:renderer && electron-builder --mac"
+    "dist:mac-arm": "npm run build:renderer && electron-builder --mac",
+    "dist:win": "npm run build:renderer && electron-builder --win"
   },
   "dependencies": {
     "@sftp-push-sync/core": "*",
@@ -52,6 +53,9 @@
     },
     "mac": {
       "icon": "resources/icon.icns",
+      "extendInfo": {
+        "NSLocalNetworkUsageDescription": "VeloSync benötigt Zugriff auf das lokale Netzwerk, um SFTP-Server zu erreichen."
+      },
       "target": [
         "dmg",
         "zip"
@@ -61,7 +65,8 @@
     "win": {
       "icon": "resources/icon.ico",
       "target": [
-        "nsis"
+        "nsis",
+        "portable"
       ]
     },
     "linux": {

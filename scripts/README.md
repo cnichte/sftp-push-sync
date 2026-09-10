@@ -1,7 +1,8 @@
 # Skripte
 
 - `npm run generate:icons` erzeugt aus `app-icon.svg` die macOS-, Windows- und Linux-App-Icons in `packages/gui/resources`.
-- `npm run release:mac` erstellt auf macOS einen VeloSync-Release und kopiert dessen veröffentlichbare Artefakte nach `static/releases/velosync-app/v<Version>/macos-arm64` der Website. Die Updater-Datei `latest-mac.yml` bleibt im Verzeichnis `velosync-app`.
-- `npm run release:transport` transportiert bereits vorhandene Dateien aus `packages/gui/release` dorthin.
+- `npm run release:mac` erstellt auf macOS einen VeloSync-Release, legt ihn unter `packages/gui/release/v<Version>/macos-arm64` ab und kopiert die Artefakte nach `static/releases/velosync-app/v<Version>/macos-arm64`. Die Updater-Datei `latest-mac.yml` bleibt im Verzeichnis `velosync-app` der Website.
+- `npm run release:stage:linux` verschiebt von GitHub heruntergeladene Linux-Artefakte in `packages/gui/release/v<Version>/linux-x64`. Anschließend überträgt `npm run release:transport:linux` sie auf die Website.
+- `npm run release:win` erstellt auf Windows NSIS-Installer und portable `.exe`, dann legt es sie unter `packages/gui/release/v<Version>/windows-x64` ab.
 - `npm run release:tag` prüft den sauberen Git-Stand, erstellt aus der GUI-Version den annotierten Tag `v<Version>` und pusht ihn. Dadurch startet der Linux-Release auf GitHub Actions. `npm run release:tag:dry` zeigt den geplanten Schritt ohne Git-Änderung. `--allow-dirty` ist nur für bekannte, nicht zu committende lokale Änderungen vorgesehen.
 - `npm run release:patch`, `npm run release:minor` und `npm run release:major` erhöhen die GUI-Version, aktualisieren das Lockfile, committen die Versionsdateien, starten über den Tag den Linux-Release auf GitHub Actions und erstellen danach den lokalen macOS-Release inklusive Website-Transport. Mit `-- --dry-run` lassen sich die Schritte vorab anzeigen.

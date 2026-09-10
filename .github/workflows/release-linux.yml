@@ -36,14 +36,15 @@ jobs:
       - name: Build Linux release
         run: npm run dist -w @sftp-push-sync/gui -- --linux
 
+      - name: Stage Linux release
+        run: node scripts/stage-release.mjs --platform=linux
+
       - name: Upload Linux release artifact
         uses: actions/upload-artifact@v4
         with:
           name: velosync-linux-${{ inputs.tag || github.ref_name }}
           path: |
-            packages/gui/release/*.AppImage
-            packages/gui/release/*.yml
-            packages/gui/release/*.blockmap
+            packages/gui/release/v*/linux-x64/*
           if-no-files-found: error
 
       - name: Publish GitHub Release artifacts
@@ -52,6 +53,4 @@ jobs:
           tag_name: ${{ inputs.tag || github.ref_name }}
           generate_release_notes: true
           files: |
-            packages/gui/release/*.AppImage
-            packages/gui/release/*.yml
-            packages/gui/release/*.blockmap
+            packages/gui/release/v*/linux-x64/*

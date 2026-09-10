@@ -10,8 +10,10 @@
   "scripts": {
     "dev": "npm run dev -w @sftp-push-sync/gui",
     "generate:icons": "node scripts/generate-app-icons.mjs",
-    "release:mac": "npm run dist:mac-arm -w @sftp-push-sync/gui && node scripts/transport-release.mjs",
-    "release:transport": "node scripts/transport-release.mjs",
+    "release:mac": "npm run dist:mac-arm -w @sftp-push-sync/gui && node scripts/stage-release.mjs --platform=macos && node scripts/transport-release.mjs --platform=macos",
+    "release:stage:linux": "node scripts/stage-release.mjs --platform=linux",
+    "release:win": "npm run dist:win -w @sftp-push-sync/gui && node scripts/stage-release.mjs --platform=windows",
+    "release:transport:linux": "node scripts/transport-release.mjs --platform=linux",
     "release:tag": "node scripts/release-tag.mjs",
     "release:tag:dry": "node scripts/release-tag.mjs --dry-run",
     "release:patch": "node scripts/release-version.mjs --type patch",

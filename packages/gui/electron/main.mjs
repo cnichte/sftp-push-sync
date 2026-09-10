@@ -1,6 +1,7 @@
 // packages/gui/electron/main.mjs
 import { app, BrowserWindow, ipcMain, dialog, shell } from "electron";
 import fs from "fs/promises";
+import net from "net";
 import path from "path";
 import { fileURLToPath } from "url";
 import { createRequire } from "module";
@@ -17,6 +18,37 @@ const pkg = require("../package.json");
 // (siehe DEBUG-LOG-UI.md: Config-Dateien liegen projektweise verstreut).
 function getDefaultConfigPath() {
   return path.resolve(process.cwd(), "sync.config.json");
+}
+
+function isLocalNetworkHost(host) {
+  return host && (!host.includes(".") || host.endsWith(".local") || /^10\.|^192\.168\.|^172\.(1[6-9]|2\d|3[01])\./.test(host));
+}
+
+async function requestLocalNetworkAccess() {
+  if (process.platform !== "darwin") return;
+
+  const registered = await getConfigPaths();
+  const candidates = registered.length > 0 ? registered : [getDefaultConfigPath()];
+
+  for (const configPath of candidates) {
+    try {
+      const config = JSON.parse(await fs.readFile(configPath, "utf8"));
+      const connection = Object.values(config.connections || {})
+        .map((entry) => entry.sync ?? entry)
+        .find((entry) => isLocalNetworkHost(entry.host));
+      if (!connection) continue;
+
+      const socket = net.connect({ host: connection.host, port: connection.port ?? 22 });
+      socket.setTimeout(1_500);
+      socket.once("connect", () => socket.destroy());
+      socket.once("timeout", () => socket.destroy());
+      socket.once("error", () => socket.destroy());
+      socket.unref();
+      return;
+    } catch (error) {
+      logger.debug(`Local network access check skipped: ${error?.message || error}`);
+    }
+  }
 }
 
 // App-weites Logging (Main-Prozess). Pro-Job-Logs kommen später über die
@@ -66,6 +98,7 @@ function createWindow() {
 app.whenReady().then(() => {
   initSettingsStore(app.getPath("userData"));
   createWindow();
+  requestLocalNetworkAccess();
 
   initUpdater({
     logger,

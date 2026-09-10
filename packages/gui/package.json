@@ -1,6 +1,6 @@
 {
   "name": "@sftp-push-sync/gui",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "VeloSync desktop application for sftp-push-sync",
   "type": "module",
   "private": true,
@@ -51,16 +51,23 @@
     },
     "mac": {
       "icon": "resources/icon.icns",
-      "target": ["dmg", "zip"],
+      "target": [
+        "dmg",
+        "zip"
+      ],
       "category": "public.app-category.developer-tools"
     },
     "win": {
       "icon": "resources/icon.ico",
-      "target": ["nsis"]
+      "target": [
+        "nsis"
+      ]
     },
     "linux": {
       "icon": "resources/icon.png",
-      "target": ["AppImage"]
+      "target": [
+        "AppImage"
+      ]
     },
     "publish": {
       "provider": "generic",

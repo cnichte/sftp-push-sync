@@ -8,7 +8,7 @@ Implements a push syncronisation with Dry-Run. Performs the following tasks:
 
 Why?
 
-Reliability was mega important to me, so that for example no orphaned documents are left on the server and only the parts that have realy changed are actually updated, not more note less.
+Reliability was mega important to me, so that for example no orphaned documents are left on the server and only the parts that have realy changed are actually updated, not more not less.
 
 - I use the script to transfer [Hugo websites](https://gohugo.io) to the server.
 - This is part of the [Hugo-Toolbox](https://www.npmjs.com/package/hugo-toolbox).

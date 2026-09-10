@@ -26,15 +26,18 @@ export async function walkLocal(
     progress = null,
     scanChunk = 100,
     log = null,
+    signal = null,
   } = {}
 ) {
   const result = new Map();
   let scanned = 0;
 
   async function recurse(current) {
+    if (signal?.aborted) throw new Error("Sync aborted.");
     const entries = await fsp.readdir(current, { withFileTypes: true });
 
     for (const entry of entries) {
+      if (signal?.aborted) throw new Error("Sync aborted.");
       const full = path.join(current, entry.name);
 
       if (entry.isDirectory()) {
@@ -127,6 +130,7 @@ export async function walkRemote(
     scanChunk = 100,
     log = null,
     concurrency = 5,  // Max parallel directory listings
+    signal = null,
   } = {}
 ) {
   const result = new Map();
@@ -160,6 +164,7 @@ export async function walkRemote(
 
   async function takeNextDirectory() {
     while (queue.length === 0) {
+      if (signal?.aborted) throw new Error("Sync aborted.");
       if (activeWorkers === 0) return null;
       await new Promise((resolve) => {
         wakeWorkers.push(resolve);
@@ -180,11 +185,13 @@ export async function walkRemote(
   }
 
   async function processDirectory(remoteDir, prefix, slotIndex) {
+    if (signal?.aborted) throw new Error("Sync aborted.");
     const items = await sftp.list(remoteDir);
     let processedEntries = 0;
     progress?.updateSlot?.("remote", slotIndex, remoteDir, 0, items.length);
 
     for (const item of items) {
+      if (signal?.aborted) throw new Error("Sync aborted.");
       if (!item.name || item.name === "." || item.name === "..") continue;
 
       processedEntries += 1;
@@ -242,6 +249,7 @@ export async function walkRemote(
 
   const runWorker = async (slotIndex) => {
     while (true) {
+      if (signal?.aborted) throw new Error("Sync aborted.");
       const next = await takeNextDirectory();
       if (!next) {
         progress?.updateSlot?.("remote", slotIndex, null);

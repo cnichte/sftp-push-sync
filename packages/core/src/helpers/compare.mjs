@@ -173,7 +173,7 @@ export async function analyseDifferences({
       updateBatchProgress({
         current: completed,
         total: totalContentCompare,
-        jobs: activeJobs.filter(Boolean),
+        jobs: activeJobs.map((job, slotIndex) => job ? { ...job, slotIndex } : null).filter(Boolean),
         force,
       });
     };

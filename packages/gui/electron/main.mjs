@@ -7,17 +7,83 @@ import { fileURLToPath } from "url";
 import { createRequire } from "module";
 import winston from "winston";
 import { startJob, abortJob, resizeJob } from "./jobManager.mjs";
-import { initSettingsStore, getConfigPaths, addConfigPath, removeConfigPath } from "./settingsStore.mjs";
+import { initSettingsStore, getConfigPaths, addConfigPath, removeConfigPath, saveJobHistory, getJobHistory, getProjectJobHistory } from "./settingsStore.mjs";
 import { initUpdater, checkForUpdates, downloadUpdate, quitAndInstall } from "./updater.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 const pkg = require("../package.json");
+const DEFAULT_MEDIA_EXTENSIONS = [
+  ".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif", ".tif", ".tiff",
+  ".mp4", ".mov", ".m4v", ".mp3", ".wav", ".flac",
+];
 
 // Fallback, solange der Nutzer noch keine sync.config.json registriert hat
 // (siehe DEBUG-LOG-UI.md: Config-Dateien liegen projektweise verstreut).
 function getDefaultConfigPath() {
   return path.resolve(process.cwd(), "sync.config.json");
+}
+
+async function getFileInfo(filePath) {
+  try {
+    const info = await fs.stat(filePath);
+    return { path: filePath, exists: true, size: info.size, modifiedAt: info.mtime.toISOString() };
+  } catch (error) {
+    if (error?.code === "ENOENT") return { path: filePath, exists: false };
+    throw error;
+  }
+}
+
+async function renameConnectionFiles({ configPath, config, connection, oldName, newName }) {
+  const projectDir = path.dirname(configPath);
+  const logPattern = config.logFile || ".sync.{target}.log";
+  const oldLegacyCache = connection.syncCache || `.sync-cache.${oldName}.json`;
+  const newLegacyCache = oldLegacyCache.includes(oldName)
+    ? oldLegacyCache.replaceAll(oldName, newName)
+    : oldLegacyCache;
+  const candidates = [
+    [logPattern.replace("{target}", oldName), logPattern.replace("{target}", newName)],
+    [`.sync-cache.${oldName}.ndjson`, `.sync-cache.${newName}.ndjson`],
+    [`.sync-recovery.${oldName}.json`, `.sync-recovery.${newName}.json`],
+    [oldLegacyCache, newLegacyCache],
+    [`${oldLegacyCache}.bak`, `${newLegacyCache}.bak`],
+    [`${oldLegacyCache}.migrated`, `${newLegacyCache}.migrated`],
+    [`${oldLegacyCache}.corrupt`, `${newLegacyCache}.corrupt`],
+  ].map(([from, to]) => [path.resolve(projectDir, from), path.resolve(projectDir, to)])
+    .filter(([from, to]) => from !== to);
+
+  for (const [from, to] of candidates) {
+    try {
+      await fs.access(from);
+    } catch {
+      continue;
+    }
+    try {
+      await fs.access(to);
+      throw new Error(`Zieldatei existiert bereits: ${to}`);
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+  }
+
+  const renamed = [];
+  try {
+    for (const [from, to] of candidates) {
+      try {
+        await fs.rename(from, to);
+        renamed.push([from, to]);
+      } catch (error) {
+        if (error?.code !== "ENOENT") throw error;
+      }
+    }
+  } catch (error) {
+    await Promise.allSettled(renamed.reverse().map(([from, to]) => fs.rename(to, from)));
+    throw error;
+  }
+
+  if (connection.syncCache?.includes(oldName)) {
+    connection.syncCache = newLegacyCache;
+  }
 }
 
 function isLocalNetworkHost(host) {
@@ -133,7 +199,7 @@ ipcMain.handle("list-connections", async () => {
   for (const cfgPath of candidates) {
     try {
       const raw = JSON.parse(await fs.readFile(cfgPath, "utf8"));
-      const projectName = path.basename(path.dirname(cfgPath));
+      const projectName = raw.projectName || path.basename(path.dirname(cfgPath));
       for (const [name, cfg] of Object.entries(raw.connections || {})) {
         const sync = cfg.sync ?? cfg;
         const sidecar = cfg.sidecar ?? {};
@@ -172,6 +238,93 @@ ipcMain.handle("list-connections", async () => {
   return { ok: errors.length === 0, connections, errors, configPaths: candidates };
 });
 
+ipcMain.handle("get-project-settings", async (_event, configPath) => {
+  try {
+    const raw = JSON.parse(await fs.readFile(configPath, "utf8"));
+    return {
+      ok: true,
+      settings: {
+        projectName: raw.projectName || path.basename(path.dirname(configPath)),
+        hasCustomProjectName: Boolean(raw.projectName),
+        parallelScan: raw.parallelScan ?? true,
+        cleanupEmptyDirs: raw.cleanupEmptyDirs ?? true,
+        include: raw.include ?? [],
+        exclude: raw.exclude ?? [],
+        textExtensions: raw.textExtensions ?? [],
+        mediaExtensions: raw.mediaExtensions ?? DEFAULT_MEDIA_EXTENSIONS,
+        scanChunk: raw.progress?.scanChunk ?? 10,
+        analyzeChunk: raw.progress?.analyzeChunk ?? 1,
+        logLevel: raw.logLevel ?? "normal",
+        logTimestamps: raw.logTimestamps ?? false,
+        logFile: raw.logFile ?? ".sftp-push-sync.{target}.log",
+      },
+    };
+  } catch (err) {
+    return { ok: false, error: err?.message || String(err) };
+  }
+});
+
+ipcMain.handle("update-project-settings", async (_event, { configPath, settings }) => {
+  try {
+    const raw = JSON.parse(await fs.readFile(configPath, "utf8"));
+    const projectName = settings.projectName.trim();
+    if (!projectName) return { ok: false, error: "Project name must not be empty" };
+    if (settings.resetProjectName) delete raw.projectName;
+    else raw.projectName = projectName;
+    raw.parallelScan = Boolean(settings.parallelScan);
+    raw.cleanupEmptyDirs = Boolean(settings.cleanupEmptyDirs);
+    raw.include = settings.include;
+    raw.exclude = settings.exclude;
+    raw.textExtensions = settings.textExtensions;
+    raw.mediaExtensions = settings.mediaExtensions;
+    raw.progress = {
+      ...(raw.progress || {}),
+      scanChunk: Number(settings.scanChunk) || 1,
+      analyzeChunk: Number(settings.analyzeChunk) || 1,
+    };
+    raw.logLevel = settings.logLevel;
+    raw.logTimestamps = Boolean(settings.logTimestamps);
+    raw.logFile = settings.logFile;
+    await fs.writeFile(configPath, JSON.stringify(raw, null, 2) + "\n", "utf8");
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err?.message || String(err) };
+  }
+});
+
+ipcMain.handle("get-job-files", async (_event, { configPath, name }) => {
+  try {
+    const raw = JSON.parse(await fs.readFile(configPath, "utf8"));
+    if (!raw.connections?.[name]) return { ok: false, error: `Connection '${name}' not found in ${configPath}` };
+    const projectDir = path.dirname(configPath);
+    const logPattern = raw.logFile || ".sync.{target}.log";
+    const logPath = path.resolve(projectDir, logPattern.replace("{target}", name));
+    const cachePath = path.resolve(projectDir, `.sync-cache.${name}.ndjson`);
+    return { ok: true, log: await getFileInfo(logPath), cache: await getFileInfo(cachePath) };
+  } catch (err) {
+    return { ok: false, error: err?.message || String(err) };
+  }
+});
+
+ipcMain.handle("show-job-file", async (_event, filePath) => {
+  shell.showItemInFolder(filePath);
+  return { ok: true };
+});
+
+ipcMain.handle("open-job-file", async (_event, filePath) => {
+  const error = await shell.openPath(filePath);
+  return error ? { ok: false, error } : { ok: true };
+});
+
+ipcMain.handle("delete-job-cache", async (_event, filePath) => {
+  try {
+    await fs.unlink(filePath);
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: error?.message || String(error) };
+  }
+});
+
 // Schreibt bearbeitete Properties zurück in die jeweilige sync.config.json.
 // Nur die Connection mit `name` wird angefasst, der Rest der Datei (andere
 // Connections, globale Settings) bleibt unverändert.
@@ -193,6 +346,7 @@ ipcMain.handle("update-connection", async (_event, { configPath, name, updates }
       if (raw.connections[newName]) {
         return { ok: false, error: `Connection '${newName}' already exists in ${configPath}` };
       }
+      await renameConnectionFiles({ configPath, config: raw, connection: cfg, oldName: name, newName });
       delete raw.connections[name];
       raw.connections[newName] = cfg;
     }
@@ -301,24 +455,47 @@ ipcMain.handle("remove-config-path", async (_event, targetPath) => {
   return { ok: true };
 });
 
-// Startet einen Sync-Job in einem Pseudo-Terminal (siehe jobManager.mjs für
-// die Connection-Lock- und Overlap-Regeln). Rohe Terminal-Bytes und der
-// Exit-Status werden pro Connection-ID an den Renderer zurückgestreamt, wo
-// xterm.js sie rendert (identische Darstellung wie im echten Terminal,
-// inklusive Fortschrittsbalken).
+// Startet einen Sync-Job mit strukturierten Core-Events und einem separaten
+// Protokollstrom für die technische Detailansicht.
 ipcMain.handle("start-job", async (event, { connection, flags, cols, rows }) => {
+  const abortOnRendererReset = () => {
+    if (abortJob(connection.id)) {
+      logger.info(`abort-job ${connection.id}: renderer reset`);
+    }
+  };
+  const removeRendererLifecycleHandlers = () => {
+    event.sender.removeListener("destroyed", abortOnRendererReset);
+  };
   const result = startJob({
     connection,
     flags: flags || [],
     cols,
     rows,
-    onData: (chunk) => {
-      event.sender.send("job-data", { connectionId: connection.id, chunk });
+    onData: (log) => {
+      if (!event.sender.isDestroyed()) {
+        event.sender.send("job-data", { connectionId: connection.id, log });
+      }
+    },
+    onEvent: (jobEvent) => {
+      if (jobEvent.type === "complete") {
+        saveJobHistory(connection, jobEvent).catch((error) => {
+          logger.warn(`Could not save job history for ${connection.id}: ${error?.message || error}`);
+        });
+      }
+      if (!event.sender.isDestroyed()) {
+        event.sender.send("job-event", { connectionId: connection.id, event: jobEvent });
+      }
     },
     onExit: (code, signal) => {
-      event.sender.send("job-exit", { connectionId: connection.id, code, signal });
+      removeRendererLifecycleHandlers();
+      if (!event.sender.isDestroyed()) {
+        event.sender.send("job-exit", { connectionId: connection.id, code, signal });
+      }
     },
   });
+  if (result.ok) {
+    event.sender.once("destroyed", abortOnRendererReset);
+  }
   logger.info(`start-job ${connection.id}: ${result.ok ? "started" : "rejected"}`);
   return result;
 });
@@ -326,6 +503,16 @@ ipcMain.handle("start-job", async (event, { connection, flags, cols, rows }) => 
 ipcMain.handle("abort-job", async (_event, { id }) => {
   return { ok: abortJob(id) };
 });
+
+ipcMain.handle("get-job-history", async (_event, connectionId) => ({
+  ok: true,
+  history: await getJobHistory(connectionId),
+}));
+
+ipcMain.handle("get-project-job-history", async (_event, configPath) => ({
+  ok: true,
+  history: await getProjectJobHistory(configPath),
+}));
 
 ipcMain.on("resize-job", (_event, { id, cols, rows }) => {
   resizeJob(id, cols, rows);

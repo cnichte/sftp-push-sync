@@ -18,9 +18,10 @@ async function load() {
   try {
     cache = JSON.parse(await fsp.readFile(settingsPath, "utf8"));
   } catch {
-    cache = { configPaths: [] };
+    cache = { configPaths: [], jobHistory: {} };
   }
   if (!Array.isArray(cache.configPaths)) cache.configPaths = [];
+  if (!cache.jobHistory || typeof cache.jobHistory !== "object") cache.jobHistory = {};
   return cache;
 }
 
@@ -53,4 +54,30 @@ export async function removeConfigPath(configPath) {
   settings.configPaths = settings.configPaths.filter((p) => p !== resolved);
   await persist();
   return [...settings.configPaths];
+}
+
+export async function saveJobHistory(connection, summary) {
+  const settings = await load();
+  settings.jobHistory[connection.id] = {
+    connectionId: connection.id,
+    configPath: connection.configPath,
+    name: connection.name,
+    projectName: connection.projectName,
+    completedAt: new Date().toISOString(),
+    ...summary,
+  };
+  await persist();
+  return settings.jobHistory[connection.id];
+}
+
+export async function getJobHistory(connectionId) {
+  const settings = await load();
+  return settings.jobHistory[connectionId] || null;
+}
+
+export async function getProjectJobHistory(configPath) {
+  const settings = await load();
+  return Object.values(settings.jobHistory)
+    .filter((entry) => entry.configPath === configPath)
+    .sort((left, right) => String(right.completedAt).localeCompare(String(left.completedAt)));
 }

@@ -31,6 +31,10 @@ The file `sftp-push-sync.mjs` is pure JavaScript (ESM). Node.js can execute it d
 
 ## News
 
+- Wer nicht so gerne über das Terminal arbeitet kann demnächst über die App VeloSync das selbe machen. Die App wird auf Linux Windows und Mac-OS arbeiten.
+ 
+ ![Screenshot VeloSync App Benutzeroberfläche](images/velosync-app-001.jpg)
+
 - With version `4.0.0`, the app is ‘feature complete’, unless I can think of any new features. From now on, there will only be bug fixes.
 - I’ve improved the loading-bar and made tons of stability, performance improvements in the latest Updates, [see also CHANGELOG.md](https://github.com/cnichte/sftp-push-sync/blob/main/CHANGELOG.md).
 

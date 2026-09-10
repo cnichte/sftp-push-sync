@@ -2,7 +2,7 @@
 
 ## [unpublished]
 
-- UI Introduction. Will run on MacOS, Linux and Windows.
+- UI Introduction: VeloSync App. Will run on MacOS, Linux and Windows.
 
 ## [4.0.0] - 2026-09-10
 

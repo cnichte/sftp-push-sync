@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "target": "staging",
+  "status": "failed",
+  "phase": "connecting",
+  "updatedAt": "2026-09-10T20:41:47.756Z",
+  "error": "Local root does not exist: /Users/cnichte/develop-software/01-active/sftp-push-sync/production/sftp-push-sync/packages/gui/public"
+}

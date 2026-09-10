@@ -1,9 +1,6 @@
 // packages/gui/src/App.jsx
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Terminal } from "@xterm/xterm";
-import { FitAddon } from "@xterm/addon-fit";
-import "@xterm/xterm/css/xterm.css";
 import {
   AppShell,
   Group,
@@ -24,6 +21,12 @@ import {
   NumberInput,
   Textarea,
   Loader,
+  Switch,
+  Badge,
+  Progress,
+  ScrollArea,
+  SimpleGrid,
+  UnstyledButton,
 } from "@mantine/core";
 import {
   IconPlus,
@@ -40,12 +43,17 @@ import {
   IconTerminal2,
   IconDeviceFloppy,
   IconFolderOpen,
+  IconFlask,
+  IconRestore,
+  IconFileText,
+  IconTrash,
 } from "@tabler/icons-react";
 import SettingsWindow from "./SettingsWindow.jsx";
 import AboutModal from "./AboutModal.jsx";
 
 const STATUS_ICON = {
   running: <Loader size={14} />,
+  aborting: <Loader size={14} color="var(--mantine-color-blue-6)" />,
   done: <IconCheck size={14} color="var(--mantine-color-green-6)" />,
   failed: <IconX size={14} color="var(--mantine-color-red-6)" />,
   aborted: <IconX size={14} color="var(--mantine-color-yellow-6)" />,
@@ -65,7 +73,6 @@ function textToList(text) {
 function connectionToForm(conn) {
   return {
     name: conn.name || "",
-    description: conn.description || "",
     host: conn.host || "",
     port: conn.port ?? 22,
     user: conn.user || "",
@@ -80,6 +87,219 @@ function connectionToForm(conn) {
     sidecarDownloadList: listToText(conn.sidecarDownloadList),
   };
 }
+function projectSettingsToForm(settings) {
+  return {
+    ...settings,
+    include: listToText(settings.include),
+    exclude: listToText(settings.exclude),
+    textExtensions: listToText(settings.textExtensions),
+    mediaExtensions: listToText(settings.mediaExtensions),
+  };
+}
+function formatFileInfo(file) {
+  if (!file?.exists) return "-";
+  const size = file.size < 1024 * 1024
+    ? `${Math.round(file.size / 1024)} KB`
+    : `${(file.size / (1024 * 1024)).toFixed(1)} MB`;
+  return `${size} | ${new Date(file.modifiedAt).toLocaleString()}`;
+}
+function formatBytes(bytes = 0) {
+  if (!bytes) return "0 B";
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+function formatDuration(seconds = 0) {
+  const totalSeconds = Math.max(0, Math.floor(Number(seconds) || 0));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const remainingSeconds = totalSeconds % 60;
+  if (hours > 0) return `${hours}:${String(minutes).padStart(2, "0")}:${String(remainingSeconds).padStart(2, "0")}`;
+  if (minutes > 0) return `${minutes}:${String(remainingSeconds).padStart(2, "0")}`;
+  return `${totalSeconds} s`;
+}
+function stripAnsi(value) {
+  return String(value)
+    .replace(/(?:\u001B\[[0-?]*[ -/]*[@-~]|\u009B[0-?]*[ -/]*[@-~]|\u001B\][^\u0007]*(?:\u0007|\u001B\\))/g, "")
+    .replace(/\[\d+(?:;\d+)*m/g, "");
+}
+
+function StructuredJobView({ job, t, lastHistory = null }) {
+  const events = job.events || [];
+  const phase = job.phase || [...events].reverse().find((event) => event.type === "phase");
+  const progress = job.progress || [...events].reverse().find((event) => ["progress", "task-progress", "scan-progress", "compare-progress"].includes(event.type));
+  const plan = job.plan || [...events].reverse().find((event) => event.type === "plan");
+  const complete = job.complete || [...events].reverse().find((event) => event.type === "complete");
+  const percent = progress?.total ? Math.min(100, Math.round((progress.current / progress.total) * 100)) : 0;
+  const phases = ["connecting", "scan", "compare", "plan", "apply", "cleanup"];
+  const activePhase = phase?.name;
+  const activePhaseIndex = phases.indexOf(activePhase);
+  const scanWorkers = Object.values(job.scanWorkers || {}).filter((worker) => worker.active);
+  const compareWorkers = job.compareWorkers || [];
+  const workers = activePhase === "scan"
+    ? [...scanWorkers.values()].filter((worker) => worker.active)
+    : activePhase === "compare"
+      ? compareWorkers
+      : [];
+
+  return (
+    <Tabs defaultValue="overview" style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+      <Tabs.List>
+        <Tabs.Tab value="overview">{t("jobView.overview")}</Tabs.Tab>
+        <Tabs.Tab value="log">{t("jobView.log")}</Tabs.Tab>
+        {lastHistory && <Tabs.Tab value="lastRun">{t("jobView.lastRun")}</Tabs.Tab>}
+      </Tabs.List>
+      <Tabs.Panel value="overview" pt="md" style={{ flex: 1, minHeight: 0 }}>
+        <Stack gap="md">
+          <Group justify="space-between">
+            <Stack gap={2}>
+              <Text size="sm" fw={600}>{phase?.label || t("jobView.preparing")}{job.mode?.dryRun ? ` | ${t("jobView.dry")}` : ""}</Text>
+              {progress?.path && <Text size="xs" c="dimmed">{progress.path}</Text>}
+            </Stack>
+          </Group>
+          <SimpleGrid cols={{ base: 2, sm: 3, lg: 6 }} spacing="xs">
+            {phases.map((name) => {
+              const phaseIndex = phases.indexOf(name);
+              const active = job.status === "running" && (activePhase === name || (name === "connecting" && activePhase === "connected"));
+              const complete = activePhaseIndex > phaseIndex || job.status === "done";
+              return (
+                <Group key={name} gap={5} wrap="nowrap">
+                  {active ? <Loader size={13} /> : complete ? <IconCheck size={13} color="var(--mantine-color-green-6)" /> : <span style={{ width: 13, height: 13, borderRadius: "50%", background: "var(--mantine-color-gray-4)" }} />}
+                  <Text size="xs" c={active ? "blue" : complete ? "green" : "dimmed"}>{t(`jobView.phase.${name}`)}</Text>
+                </Group>
+              );
+            })}
+          </SimpleGrid>
+          {activePhase === "scan" && (
+            <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="xs">
+              {["local", "remote"].map((channel) => {
+                const scan = job.scanChannels?.[channel];
+                return (
+                  <Group key={channel} gap="xs" align="flex-start" wrap="nowrap">
+                    {scan?.complete ? <IconCheck size={16} color="var(--mantine-color-green-6)" style={{ marginTop: 2 }} /> : <Loader size={16} mt={2} />}
+                    <Stack gap={1} style={{ minWidth: 0 }}>
+                      <Group gap={5} wrap="nowrap"><Text size="xs">{t(`jobView.scan.${channel}`)} · {t("jobView.workerCount", { count: channel === "local" ? phase?.localWorkers || 1 : job.scanWorkerCount || phase?.remoteWorkers || 1 })}</Text><Text size="xs" c="dimmed">{scan?.current || 0} {t("jobView.files")}</Text></Group>
+                      <Text size="xs" c="dimmed" truncate>{scan?.complete ? t("jobView.scanComplete") : scan?.lastRel || t("jobView.waiting")}</Text>
+                    </Stack>
+                  </Group>
+                );
+              })}
+            </SimpleGrid>
+          )}
+          {progress && activePhase !== "scan" && (
+            <Stack gap={5}>
+              <Group justify="space-between"><Text size="xs">{progress.label}{job.taskWorkers ? ` · ${t("jobView.workerCount", { count: job.taskWorkers })}` : ""}</Text><Text size="xs" c="dimmed">{progress.total ? `${progress.current}/${progress.total} (${percent}%)` : `${progress.current} ${progress.unit || t("jobView.files")}`}</Text></Group>
+              <Progress value={progress.total ? percent : 100} animated={job.status === "running"} />
+              {progress.bytes > 0 && <Text size="xs" c="dimmed">{formatBytes(progress.bytes)}</Text>}
+            </Stack>
+          )}
+          {workers.length > 0 && (
+            <Stack gap={6}>
+              <Text size="xs" fw={500}>{t("jobView.workers")}</Text>
+              {workers.map((worker, index) => {
+                const workerPercent = worker.total > 0 ? Math.min(100, Math.round((worker.current / worker.total) * 100)) : worker.totalBytes > 0 ? Math.min(100, Math.round((worker.receivedBytes / worker.totalBytes) * 100)) : 0;
+                const workerCurrent = worker.current ?? worker.receivedBytes ?? 0;
+                const workerTotal = worker.total ?? worker.totalBytes ?? 0;
+                return (
+                  <Stack key={worker.slotIndex ?? index} gap={3}>
+                    <Group justify="space-between" gap="xs" wrap="nowrap">
+                      <Text size="xs" c="dimmed" truncate>{t("jobView.worker", { number: (worker.slotIndex ?? index) + 1 })}: {worker.path}</Text>
+                      {workerTotal > 0 && <Text size="xs" c="dimmed">{worker.totalBytes ? `${formatBytes(workerCurrent)}/${formatBytes(workerTotal)}` : `${workerCurrent}/${workerTotal}`}</Text>}
+                    </Group>
+                    <Progress size="sm" value={workerTotal > 0 ? workerPercent : 100} animated />
+                  </Stack>
+                );
+              })}
+            </Stack>
+          )}
+          {plan && (
+            <SimpleGrid cols={4} spacing="xs">
+              <Stack gap={0}><Text size="xs" c="dimmed">{t("jobView.add")}</Text><Text fw={600}>{plan.add}</Text></Stack>
+              <Stack gap={0}><Text size="xs" c="dimmed">{t("jobView.update")}</Text><Text fw={600}>{plan.update}</Text></Stack>
+              <Stack gap={0}><Text size="xs" c="dimmed">{t("jobView.delete")}</Text><Text fw={600}>{plan.delete}</Text></Stack>
+              <Stack gap={0}><Text size="xs" c="dimmed">{t("jobView.upload")}</Text><Text fw={600}>{formatBytes(plan.uploadBytes)}</Text></Stack>
+            </SimpleGrid>
+          )}
+          {Number.isFinite(complete?.durationSec) && (
+            <Text size="xs" c="dimmed">{t("jobView.duration", { seconds: formatDuration(complete.durationSec) })}</Text>
+          )}
+          {complete?.metrics?.length > 0 && (
+            <Stack gap={6}>
+              <Text size="xs" fw={500}>{t("jobView.performance")}</Text>
+              <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="xs">
+                {complete.metrics.map((metric) => (
+                  <Stack key={metric.name} gap={1} p="xs" style={{ border: "1px solid var(--mantine-color-default-border)" }}>
+                    <Text size="xs" fw={500}>{metric.name}</Text>
+                    <Text size="xs" c="dimmed">{t("jobView.metricDuration", { seconds: formatDuration(metric.durationSec) })} | {t("jobView.metricFiles", { count: metric.files })}</Text>
+                    {metric.bytes > 0 && <Text size="xs" c="dimmed">{formatBytes(metric.bytes)} | {metric.megabytesPerSecond.toFixed(1)} MB/s</Text>}
+                  </Stack>
+                ))}
+              </SimpleGrid>
+            </Stack>
+          )}
+          {(complete?.addedPaths?.length || complete?.updatedPaths?.length || complete?.deletedPaths?.length) && (
+            <Stack gap={4}>
+              <Text size="xs" fw={500}>{t("jobView.changes")}</Text>
+              {[{ symbol: "+", color: "green", paths: complete.addedPaths }, { symbol: "~", color: "yellow", paths: complete.updatedPaths }, { symbol: "-", color: "red", paths: complete.deletedPaths }].map((group) =>
+                group.paths?.map((filePath) => <Text key={`${group.symbol}:${filePath}`} size="xs" c={group.color} ff="monospace">{group.symbol} {filePath}</Text>)
+              )}
+            </Stack>
+          )}
+          {complete?.folders && <Text size="xs" c="dimmed">{t("jobView.folders", complete.folders)}</Text>}
+          {complete?.error && <Alert color="red" py={4}><Text size="xs">{complete.error}</Text></Alert>}
+        </Stack>
+      </Tabs.Panel>
+      <Tabs.Panel value="log" pt="sm" style={{ flex: 1, minHeight: 0 }}>
+        <ScrollArea h="100%" type="auto" style={{ background: "#1a1b1e", padding: "var(--mantine-spacing-xs)" }}>
+          <Stack gap={2}>
+            {job.logs.map((log, index) => <Text key={index} size="xs" ff="monospace" c={log.level === "error" ? "red.4" : "gray.3"} style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{log.line}</Text>)}
+          </Stack>
+        </ScrollArea>
+      </Tabs.Panel>
+      {lastHistory && (
+        <Tabs.Panel value="lastRun" pt="sm" style={{ flex: 1, minHeight: 0 }}>
+          <StructuredJobView job={historyToJob(lastHistory)} t={t} />
+        </Tabs.Panel>
+      )}
+    </Tabs>
+  );
+}
+
+function historyToJob(history) {
+  return {
+    status: history.ok ? "done" : history.aborted ? "aborted" : "failed",
+    events: [],
+    logs: (history.logs || []).map((log) => ({ ...log, line: stripAnsi(log.line) })),
+    complete: history,
+    plan: history,
+    mode: history.mode,
+    phase: { name: "cleanup", label: "Letzter Lauf" },
+  };
+}
+
+function GroupHistoryView({ history, groupName, t }) {
+  return (
+    <Stack gap="xs" style={{ flex: 1, minHeight: 0 }}>
+      <Text size="sm" fw={600}>{t("jobView.groupHistory", { name: groupName })}</Text>
+      <ScrollArea style={{ flex: 1, minHeight: 0 }}>
+        <Stack gap={4}>
+          {history.map((entry) => (
+            <Group key={entry.connectionId} justify="space-between" p="xs" style={{ border: "1px solid var(--mantine-color-default-border)" }}>
+              <Stack gap={1}>
+                <Text size="sm" fw={500}>{entry.name}</Text>
+                <Text size="xs" c="dimmed">{new Date(entry.completedAt).toLocaleString()}</Text>
+              </Stack>
+              <Group gap="md">
+                <Text size="xs">{t("jobView.duration", { seconds: formatDuration(entry.durationSec) })}</Text>
+                <Text size="xs">+{entry.add || 0} ~{entry.update || 0} -{entry.delete || 0}</Text>
+                <Badge size="xs" color={entry.ok ? "green" : entry.aborted ? "yellow" : "red"} variant="light">{entry.ok ? t("jobs.status.done") : entry.aborted ? t("jobs.status.aborted") : t("jobs.status.failed")}</Badge>
+              </Group>
+            </Group>
+          ))}
+        </Stack>
+      </ScrollArea>
+    </Stack>
+  );
+}
 
 // Leichtgewichtiger Ersatz für Mantine's `Splitter` (der benötigt v9 + React 19
 // als Peer-Dependency — zu großer/riskanter Sprung für eine Komponente).
@@ -89,14 +309,19 @@ export default function App() {
   const [connections, setConnections] = useState([]);
   const [configErrors, setConfigErrors] = useState([]);
   const [selected, setSelected] = useState(null);
+  const [selectedProject, setSelectedProject] = useState(null);
+  const [selectedHistory, setSelectedHistory] = useState(null);
+  const [projectHistory, setProjectHistory] = useState([]);
+  const [historyTabs, setHistoryTabs] = useState([]);
   const [jobs, setJobs] = useState({}); // connection.id -> { status, logs: string[], connection }
   const [activeTab, setActiveTab] = useState(null);
   const [conflict, setConflict] = useState(null);
   const [dropError, setDropError] = useState(null);
   const [form, setForm] = useState(null);
+  const [projectForm, setProjectForm] = useState(null);
+  const [jobFiles, setJobFiles] = useState(null);
+  const [runOptions, setRunOptions] = useState({});
   const [saveError, setSaveError] = useState(null);
-  const terminalsRef = useRef({}); // connection.id -> { term, fitAddon, resizeObserver }
-  const pendingChunksRef = useRef({}); // connection.id -> string[] (data arriving before the terminal is mounted)
   const [openGroups, setOpenGroups] = useState([]);
   const [openPropertyGroups, setOpenPropertyGroups] = useState(["connection", "sync", "sidecar"]);
   const [appInfo, setAppInfo] = useState(null);
@@ -137,8 +362,8 @@ export default function App() {
       setConfigErrors(result.errors || []);
       // Neu entdeckte Projekte im Accordion standardmäßig aufgeklappt zeigen.
       setOpenGroups((prev) => {
-        const names = [...new Set(result.connections.map((c) => c.projectName))];
-        const missing = names.filter((n) => !prev.includes(n));
+        const configPaths = [...new Set(result.connections.map((connection) => connection.configPath))];
+        const missing = configPaths.filter((configPath) => !prev.includes(configPath));
         return missing.length ? [...prev, ...missing] : prev;
       });
       return result.connections;
@@ -150,13 +375,36 @@ export default function App() {
   }, [reloadConnections]);
 
   useEffect(() => {
-    const offData = window.sftpPushSync?.onJobData(({ connectionId, chunk }) => {
-      const entry = terminalsRef.current[connectionId];
-      if (entry) {
-        entry.term.write(chunk);
-      } else {
-        (pendingChunksRef.current[connectionId] ||= []).push(chunk);
-      }
+    const offData = window.sftpPushSync?.onJobData(({ connectionId, log }) => {
+      setJobs((previous) => {
+        const job = previous[connectionId];
+        if (!job) return previous;
+        return { ...previous, [connectionId]: { ...job, logs: [...job.logs, log].slice(-1_000) } };
+      });
+    });
+    const offEvent = window.sftpPushSync?.onJobEvent(({ connectionId, event }) => {
+      setJobs((previous) => {
+        const job = previous[connectionId];
+        if (!job) return previous;
+        const events = [...job.events, event].slice(-250);
+        const next = { ...job, events };
+        if (event.type === "phase") next.phase = event;
+        if (["progress", "task-progress", "compare-progress"].includes(event.type)) next.progress = event;
+        if (event.type === "task-start") next.taskWorkers = event.workers;
+        if (event.type === "plan") next.plan = event;
+        if (event.type === "complete") next.complete = event;
+        if (event.type === "scan-progress") {
+          next.scanChannels = { ...job.scanChannels, [event.channel]: { ...event, complete: false } };
+          next.progress = event;
+        }
+        if (event.type === "scan-complete") {
+          next.scanChannels = { ...job.scanChannels, [event.channel]: { ...event, complete: true } };
+        }
+        if (event.type === "scan-worker") next.scanWorkers = { ...job.scanWorkers, [event.slotIndex]: event };
+          if (event.type === "scan-workers") next.scanWorkerCount = event.count;
+        if (event.type === "compare-progress") next.compareWorkers = event.workers || [];
+        return { ...previous, [connectionId]: next };
+      });
     });
     const offExit = window.sftpPushSync?.onJobExit(({ connectionId, code }) => {
       setJobs((prev) => {
@@ -168,44 +416,10 @@ export default function App() {
     });
     return () => {
       offData?.();
+      offEvent?.();
       offExit?.();
     };
   }, []);
-
-  // Erzeugt beim ersten Mount des Tab-Panels ein xterm.js-Terminal, das die
-  // rohe PTY-Ausgabe (inkl. ANSI/Fortschrittsbalken) 1:1 wie im echten
-  // Terminal rendert (siehe DEBUG-LOG-GUI.md: "Terminal zeigt nicht das
-  // Gleiche wie CLI" — Ursache war die fehlende TTY, nicht das GUI-Terminal).
-  // Ein ResizeObserver auf dem Container-Div passt Terminal + PTY bei JEDER
-  // Größenänderung an (Fenster-Resize, Splitter-Drag, Tab-Wechsel von
-  // verstecktem zu sichtbarem Panel) — ein einziger, robuster Mechanismus
-  // statt mehrerer einzeln verdrahteter Trigger.
-  const attachTerminal = useCallback(
-    (id) => (el) => {
-      if (!el || terminalsRef.current[id]) return;
-      const term = new Terminal({ convertEol: true, fontSize: 12, theme: { background: "#1a1b1e" } });
-      const fitAddon = new FitAddon();
-      term.loadAddon(fitAddon);
-      term.open(el);
-      fitAddon.fit();
-
-      const resizeObserver = new ResizeObserver(() => {
-        fitAddon.fit();
-        window.sftpPushSync.resizeJob(id, term.cols, term.rows);
-      });
-      resizeObserver.observe(el);
-
-      terminalsRef.current[id] = { term, fitAddon, resizeObserver };
-
-      const pending = pendingChunksRef.current[id];
-      if (pending) {
-        pending.forEach((chunk) => term.write(chunk));
-        delete pendingChunksRef.current[id];
-      }
-      window.sftpPushSync.resizeJob(id, term.cols, term.rows);
-    },
-    []
-  );
 
   const focusTab = (id) => {
     setActiveTab(id);
@@ -213,19 +427,103 @@ export default function App() {
 
   const handleSelectConnection = (conn) => {
     setSelected(conn);
+    setSelectedProject(null);
+    setHistoryTabs((tabs) => tabs.filter((tab) => tab.type !== "connection"));
+    setProjectHistory([]);
     setForm(connectionToForm(conn));
+    window.sftpPushSync.getJobFiles(conn.configPath, conn.name).then((result) => {
+      if (result?.ok) setJobFiles(result);
+    });
+    window.sftpPushSync.getJobHistory(conn.id).then((result) => {
+      const history = result?.history || null;
+      setSelectedHistory(history);
+      if (history && Object.values(jobs).some((job) => job.status === "running") && jobs[conn.id]?.status !== "running") {
+        const id = `history:${conn.id}`;
+        setHistoryTabs((tabs) => [...tabs.filter((tab) => tab.id !== id), { id, type: "connection", title: `${conn.projectName} | ${conn.name}`, history }]);
+        focusTab(id);
+      }
+    });
     setSaveError(null);
+    window.sftpPushSync.getProjectSettings(conn.configPath).then((result) => {
+      if (result?.ok) setProjectForm(projectSettingsToForm(result.settings));
+    });
     if (jobs[conn.id]) {
       focusTab(conn.id);
     }
+  };
+
+  const handleSelectProject = (configPath) => {
+    setSelected(null);
+    setForm(null);
+    setSelectedHistory(null);
+    setSaveError(null);
+    window.sftpPushSync.getProjectSettings(configPath).then((result) => {
+      if (result?.ok) {
+        setSelectedProject({ configPath });
+        setProjectForm(projectSettingsToForm(result.settings));
+      }
+    });
+    window.sftpPushSync.getProjectJobHistory(configPath).then((result) => {
+      const history = result?.history || [];
+      setProjectHistory(history);
+      if (history.length > 0 && Object.values(jobs).some((job) => job.status === "running")) {
+        const projectName = connections.find((connection) => connection.configPath === configPath)?.projectName || t("properties.group");
+        const id = `history:group:${configPath}`;
+        setHistoryTabs((tabs) => [...tabs.filter((tab) => tab.id !== id), { id, type: "group", title: projectName, history }]);
+        focusTab(id);
+      }
+    });
   };
 
   const handleFieldChange = (field, value) => {
     setForm((prev) => ({ ...prev, [field]: value }));
   };
 
+  const handleRunOptionChange = (connectionId, field, value) => {
+    setRunOptions((previous) => ({
+      ...previous,
+      [connectionId]: { ...previous[connectionId], [field]: value },
+    }));
+  };
+
+  const getJobFlags = (connection, forceDryRun = false) => {
+    const options = runOptions[connection.id] || {};
+    if (options.skipSync && !options.sidecarUpload && !options.sidecarDownload) {
+      setSaveError(t("jobs.skipSyncRequiresSidecar"));
+      return null;
+    }
+    return [
+      ...(forceDryRun || options.dryRun ? ["--dry-run"] : []),
+      ...(options.sidecarUpload ? ["--sidecar-upload"] : []),
+      ...(options.sidecarDownload ? ["--sidecar-download"] : []),
+      ...(options.skipSync ? ["--skip-sync"] : []),
+    ];
+  };
+
+  const handleProjectFieldChange = (field, value) => {
+    setProjectForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const getDefaultProjectName = (configPath) => configPath.split(/[\\/]/).slice(-2, -1)[0];
+
+  const handleResetProjectName = () => {
+    if (!selectedProject) return;
+    const defaultName = getDefaultProjectName(selectedProject.configPath);
+    setProjectForm((prev) => ({ ...prev, projectName: defaultName, hasCustomProjectName: false, resetProjectName: true }));
+  };
+
   const handleRevealInFolder = (configPath) => {
     window.sftpPushSync.revealInFolder(configPath);
+  };
+
+  const handleDeleteCache = async () => {
+    if (!jobFiles?.cache?.exists) return;
+    const result = await window.sftpPushSync.deleteJobCache(jobFiles.cache.path);
+    if (!result.ok) {
+      setSaveError(result.error || "unknown error");
+      return;
+    }
+    setJobFiles((prev) => ({ ...prev, cache: { ...prev.cache, exists: false } }));
   };
 
   const handleOpenNewJob = () => {
@@ -260,6 +558,24 @@ export default function App() {
   };
 
   const handleSaveProperties = async () => {
+    if (selectedProject && projectForm) {
+      const result = await window.sftpPushSync.updateProjectSettings(selectedProject.configPath, {
+        ...projectForm,
+        resetProjectName: Boolean(projectForm.resetProjectName),
+        include: textToList(projectForm.include),
+        exclude: textToList(projectForm.exclude),
+        textExtensions: textToList(projectForm.textExtensions),
+        mediaExtensions: textToList(projectForm.mediaExtensions),
+      });
+      if (!result.ok) {
+        setSaveError(result.error || "unknown error");
+        return;
+      }
+      setSaveError(null);
+      await reloadConnections();
+      return;
+    }
+
     if (!selected || !form) return;
     const updates = {
       ...form,
@@ -273,6 +589,7 @@ export default function App() {
       setSaveError(result.error || "unknown error");
       return;
     }
+
     setSaveError(null);
     const updatedConnections = await reloadConnections();
     const updated = updatedConnections?.find((c) => c.id === (result.id || selected.id));
@@ -283,25 +600,30 @@ export default function App() {
   };
 
 
-  const handleStartJob = async (conn) => {
+  const handleStartJob = async (conn, flags = []) => {
     if (jobs[conn.id]?.status === "running") {
       focusTab(conn.id);
       return;
     }
-    const result = await window.sftpPushSync.startJob(conn, [], 80, 24);
+    const result = await window.sftpPushSync.startJob(conn, flags, 80, 24);
     if (!result.ok) {
       setConflict({ connection: conn, ...result.conflict });
       return;
     }
     setConflict(null);
-    terminalsRef.current[conn.id]?.term.reset();
-    delete pendingChunksRef.current[conn.id];
-    setJobs((prev) => ({ ...prev, [conn.id]: { status: "running", connection: conn } }));
+    setJobs((prev) => ({ ...prev, [conn.id]: {
+      status: "running", connection: conn, events: [], logs: [], phase: null, progress: null,
+      plan: null, complete: null, mode: { dryRun: flags.includes("--dry-run") }, scanChannels: {}, scanWorkers: {}, scanWorkerCount: null, compareWorkers: [], taskWorkers: null,
+    } }));
     focusTab(conn.id);
   };
 
   const handleStop = (id) => {
     window.sftpPushSync.abortJob(id);
+    setJobs((previous) => {
+      const job = previous[id];
+      return job ? { ...previous, [id]: { ...job, status: "aborting" } } : previous;
+    });
   };
 
   // Play/Stop direkt in der Connection-Zeile — spart den Umweg über die
@@ -309,7 +631,15 @@ export default function App() {
   const handleQuickStart = (conn, e) => {
     e.stopPropagation();
     handleSelectConnection(conn);
-    handleStartJob(conn);
+    const flags = getJobFlags(conn);
+    if (flags) handleStartJob(conn, flags);
+  };
+
+  const handleQuickDryRun = (conn, e) => {
+    e.stopPropagation();
+    handleSelectConnection(conn);
+    const flags = getJobFlags(conn, true);
+    if (flags) handleStartJob(conn, flags);
   };
 
   const handleQuickStop = (id, e) => {
@@ -321,15 +651,16 @@ export default function App() {
     if (jobs[id]?.status === "running") {
       window.sftpPushSync.abortJob(id);
     }
-    terminalsRef.current[id]?.resizeObserver.disconnect();
-    terminalsRef.current[id]?.term.dispose();
-    delete terminalsRef.current[id];
-    delete pendingChunksRef.current[id];
     setJobs((prev) => {
       const next = { ...prev };
       delete next[id];
       return next;
     });
+    setActiveTab((current) => (current === id ? null : current));
+  };
+
+  const handleCloseHistoryTab = (id) => {
+    setHistoryTabs((tabs) => tabs.filter((tab) => tab.id !== id));
     setActiveTab((current) => (current === id ? null : current));
   };
 
@@ -376,13 +707,18 @@ export default function App() {
   })();
 
   const jobIds = Object.keys(jobs);
-  const isPropertiesLocked = selected ? jobs[selected.id]?.status === "running" : false;
+  const hasRunningJobs = Object.values(jobs).some((job) => job.status === "running");
+  const isPropertiesLocked = selected
+    ? ["running", "aborting"].includes(jobs[selected.id]?.status)
+    : selectedProject
+      ? Object.values(jobs).some((job) => ["running", "aborting"].includes(job.status) && job.connection.configPath === selectedProject.configPath)
+      : false;
 
   // Nach Projekt (Ordner der jeweiligen sync.config.json) gruppieren, damit
   // gleichnamige Connections aus verschiedenen Projekten unterscheidbar
   // bleiben, ohne sich auf das optionale `description`-Feld zu verlassen.
   const groups = connections.reduce((acc, conn) => {
-    (acc[conn.projectName] ||= []).push(conn);
+    (acc[conn.configPath] ||= { name: conn.projectName, connections: [] }).connections.push(conn);
     return acc;
   }, {});
 
@@ -469,12 +805,23 @@ export default function App() {
                     chevronPosition="left"
                     variant="contained"
                   >
-                    {Object.entries(groups).map(([projectName, conns]) => (
-                      <Accordion.Item key={projectName} value={projectName}>
-                        <Accordion.Control>{projectName}</Accordion.Control>
+                    {Object.entries(groups).map(([configPath, group]) => (
+                      <Accordion.Item key={configPath} value={configPath}>
+                        <Group gap={0} wrap="nowrap">
+                          <Accordion.Control
+                            aria-label={t("sidebar.toggleGroup", { name: group.name })}
+                            style={{ flex: "0 0 36px", width: 36, paddingInline: 8 }}
+                          />
+                          <UnstyledButton
+                            onClick={() => handleSelectProject(configPath)}
+                            style={{ flex: 1, minWidth: 0, padding: "var(--mantine-spacing-sm) var(--mantine-spacing-md)" }}
+                          >
+                            <Text size="sm" fw={500} lh={1.2} truncate>{group.name}</Text>
+                          </UnstyledButton>
+                        </Group>
                         <Accordion.Panel>
                           <Stack gap={4}>
-                            {conns.map((conn) => (
+                            {group.connections.map((conn) => (
                               <NavLink
                                 key={conn.id}
                                 label={conn.name}
@@ -488,41 +835,47 @@ export default function App() {
                                         {STATUS_ICON[jobs[conn.id].status]}
                                       </span>
                                     </Tooltip>
-                                    {jobs[conn.id].status === "running" ? (
+                                    {["running", "aborting"].includes(jobs[conn.id].status) ? (
                                     <Tooltip label={t("jobs.stop")}>
                                       <ActionIcon
                                         size="sm"
                                         color="red"
                                         variant="light"
+                                        loading={jobs[conn.id].status === "aborting"}
+                                        disabled={jobs[conn.id].status === "aborting"}
                                         onClick={(e) => handleQuickStop(conn.id, e)}
                                       >
                                         <IconPlayerStop size={14} />
                                       </ActionIcon>
                                     </Tooltip>
                                     ) : (
-                                      <Tooltip label={t("jobs.start")}>
-                                        <ActionIcon
-                                          size="sm"
-                                          color="green"
-                                          variant="light"
-                                          onClick={(e) => handleQuickStart(conn, e)}
-                                        >
-                                          <IconPlayerPlay size={14} />
-                                        </ActionIcon>
-                                      </Tooltip>
+                                      <>
+                                        <Tooltip label={t("jobs.dryRun")}>
+                                          <ActionIcon size="sm" color="orange" variant="light" onClick={(e) => handleQuickDryRun(conn, e)}>
+                                            <IconFlask size={14} />
+                                          </ActionIcon>
+                                        </Tooltip>
+                                        <Tooltip label={t("jobs.start")}>
+                                          <ActionIcon size="sm" color="green" variant="light" onClick={(e) => handleQuickStart(conn, e)}>
+                                            <IconPlayerPlay size={14} />
+                                          </ActionIcon>
+                                        </Tooltip>
+                                      </>
                                     )}
                                   </Group>
                                 ) : (
-                                    <Tooltip label={t("jobs.start")}>
-                                      <ActionIcon
-                                        size="sm"
-                                        color="green"
-                                        variant="light"
-                                        onClick={(e) => handleQuickStart(conn, e)}
-                                      >
-                                        <IconPlayerPlay size={14} />
-                                      </ActionIcon>
-                                    </Tooltip>
+                                    <Group gap={4} wrap="nowrap">
+                                      <Tooltip label={t("jobs.dryRun")}>
+                                        <ActionIcon size="sm" color="orange" variant="light" onClick={(e) => handleQuickDryRun(conn, e)}>
+                                          <IconFlask size={14} />
+                                        </ActionIcon>
+                                      </Tooltip>
+                                      <Tooltip label={t("jobs.start")}>
+                                        <ActionIcon size="sm" color="green" variant="light" onClick={(e) => handleQuickStart(conn, e)}>
+                                          <IconPlayerPlay size={14} />
+                                        </ActionIcon>
+                                      </Tooltip>
+                                    </Group>
                                   )
                                 }
                                 onClick={() => handleSelectConnection(conn)}
@@ -602,7 +955,11 @@ export default function App() {
                   {conflictMessage}
                 </Alert>
               )}
-              {jobIds.length === 0 ? (
+              {!hasRunningJobs && selected && selectedHistory ? (
+                <StructuredJobView job={historyToJob(selectedHistory)} t={t} />
+              ) : !hasRunningJobs && selectedProject && projectHistory.length > 0 ? (
+                <GroupHistoryView history={projectHistory} groupName={projectForm?.projectName} t={t} />
+              ) : jobIds.length === 0 ? (
                 <Stack align="center" justify="center" gap="xs" style={{ flex: 1, minHeight: 0 }}>
                   <IconTerminal2 size={32} color="var(--mantine-color-dimmed)" />
                   <Text c="dimmed" ta="center">
@@ -648,6 +1005,21 @@ export default function App() {
                         {jobs[id].connection.projectName} | {jobs[id].connection.name}
                       </Tabs.Tab>
                     ))}
+                    {historyTabs.map((tab) => (
+                      <Tabs.Tab
+                        key={tab.id}
+                        value={tab.id}
+                        rightSection={
+                          <Tooltip label={t("jobs.close")}>
+                            <ActionIcon component="span" variant="subtle" size="sm" role="button" tabIndex={0} aria-label={t("jobs.close")} onClick={(event) => { event.stopPropagation(); handleCloseHistoryTab(tab.id); }}>
+                              <IconX size={14} />
+                            </ActionIcon>
+                          </Tooltip>
+                        }
+                      >
+                        {tab.type === "connection" ? `${t("jobView.lastRun")} | ${tab.title}` : `${t("properties.group")} | ${tab.title}`}
+                      </Tabs.Tab>
+                    ))}
                   </Tabs.List>
                   {jobIds.map((id) => (
                     <Tabs.Panel
@@ -656,10 +1028,12 @@ export default function App() {
                       pt="sm"
                       style={{ flex: "1 1 0", minHeight: 0, display: "flex", flexDirection: "column" }}
                     >
-                      <div
-                        ref={attachTerminal(id)}
-                        style={{ flex: "1 1 0", minHeight: 0, background: "#1a1b1e", padding: 4 }}
-                      />
+                      <StructuredJobView job={jobs[id]} t={t} lastHistory={selected?.id === id ? selectedHistory : null} />
+                    </Tabs.Panel>
+                  ))}
+                  {historyTabs.map((tab) => (
+                    <Tabs.Panel key={tab.id} value={tab.id} pt="sm" style={{ flex: "1 1 0", minHeight: 0, display: "flex", flexDirection: "column" }}>
+                      {tab.type === "connection" ? <StructuredJobView job={historyToJob(tab.history)} t={t} /> : <GroupHistoryView history={tab.history} groupName={tab.title} t={t} />}
                     </Tabs.Panel>
                   ))}
                 </Tabs>
@@ -675,9 +1049,9 @@ export default function App() {
                 style={{ flexShrink: 0, borderBottom: "1px solid var(--mantine-color-default-border)" }}
               >
                 <Text size="sm" fw={600}>
-                  {t("properties.title")}
+                  {t("properties.title")} | {selectedProject ? t("properties.group") : t("properties.job")}
                 </Text>
-                {selected && form && (
+                {((selected && form) || (selectedProject && projectForm)) && (
                   <Tooltip label={t("properties.save")}>
                     <ActionIcon
                       variant="subtle"
@@ -692,7 +1066,56 @@ export default function App() {
                 )}
               </Group>
               <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: "var(--mantine-spacing-md)" }}>
-              {selected && form ? (
+              {selectedProject && projectForm ? (
+                <Stack gap="xs" pb="md">
+                  <TextInput
+                    size="sm"
+                    styles={{ input: { fontWeight: 500 } }}
+                    value={projectForm.projectName}
+                    disabled={isPropertiesLocked}
+                    onChange={(event) => handleProjectFieldChange("projectName", event.currentTarget.value)}
+                    rightSection={
+                      <Tooltip label={t("properties.resetProjectName")}>
+                        <ActionIcon
+                          size="sm"
+                          variant="subtle"
+                          aria-label={t("properties.resetProjectName")}
+                          disabled={isPropertiesLocked || projectForm.projectName === getDefaultProjectName(selectedProject.configPath)}
+                          onClick={handleResetProjectName}
+                        >
+                          <IconRestore size={16} />
+                        </ActionIcon>
+                      </Tooltip>
+                    }
+                  />
+                  <Group justify="space-between" gap="xs" wrap="nowrap">
+                    <Text size="xs" c="dimmed" style={{ overflowWrap: "anywhere" }}>{selectedProject.configPath}</Text>
+                    <Tooltip label={t("properties.revealInFolder")}><ActionIcon size="sm" variant="subtle" aria-label={t("properties.revealInFolder")} onClick={() => handleRevealInFolder(selectedProject.configPath)}><IconFolderOpen size={16} /></ActionIcon></Tooltip>
+                  </Group>
+                  {isPropertiesLocked && <Alert color="blue" py={4}><Text size="xs">{t("properties.projectLockedWhileRunning")}</Text></Alert>}
+                  {saveError && <Alert color="red" py={4} withCloseButton onClose={() => setSaveError(null)}><Text size="xs">{saveError}</Text></Alert>}
+                  <Accordion multiple defaultValue={["settings"]} chevronPosition="left" variant="contained">
+                    <Accordion.Item value="settings">
+                      <Accordion.Control>{t("properties.projectSettings")}</Accordion.Control>
+                      <Accordion.Panel>
+                        <Stack gap="xs">
+                          <Switch size="sm" label={t("properties.parallelScan")} checked={projectForm.parallelScan} disabled={isPropertiesLocked} onChange={(event) => handleProjectFieldChange("parallelScan", event.currentTarget.checked)} />
+                          <Switch size="sm" label={t("properties.cleanupEmptyDirs")} checked={projectForm.cleanupEmptyDirs} disabled={isPropertiesLocked} onChange={(event) => handleProjectFieldChange("cleanupEmptyDirs", event.currentTarget.checked)} />
+                          <Textarea size="xs" label={t("properties.include")} autosize minRows={1} value={projectForm.include} disabled={isPropertiesLocked} onChange={(event) => handleProjectFieldChange("include", event.currentTarget.value)} />
+                          <Textarea size="xs" label={t("properties.exclude")} autosize minRows={1} value={projectForm.exclude} disabled={isPropertiesLocked} onChange={(event) => handleProjectFieldChange("exclude", event.currentTarget.value)} />
+                          <Textarea size="xs" label={t("properties.textExtensions")} autosize minRows={1} value={projectForm.textExtensions} disabled={isPropertiesLocked} onChange={(event) => handleProjectFieldChange("textExtensions", event.currentTarget.value)} />
+                          <Textarea size="xs" label={t("properties.mediaExtensions")} autosize minRows={1} value={projectForm.mediaExtensions} disabled={isPropertiesLocked} onChange={(event) => handleProjectFieldChange("mediaExtensions", event.currentTarget.value)} />
+                          <NumberInput size="xs" label={t("properties.scanChunk")} min={1} value={projectForm.scanChunk} disabled={isPropertiesLocked} onChange={(value) => handleProjectFieldChange("scanChunk", value)} />
+                          <NumberInput size="xs" label={t("properties.analyzeChunk")} min={1} value={projectForm.analyzeChunk} disabled={isPropertiesLocked} onChange={(value) => handleProjectFieldChange("analyzeChunk", value)} />
+                          <Select size="xs" label={t("properties.logLevel")} data={["normal", "verbose", "laconic"]} value={projectForm.logLevel} disabled={isPropertiesLocked} onChange={(value) => handleProjectFieldChange("logLevel", value || "normal")} />
+                          <Switch size="sm" label={t("properties.logTimestamps")} checked={projectForm.logTimestamps} disabled={isPropertiesLocked} onChange={(event) => handleProjectFieldChange("logTimestamps", event.currentTarget.checked)} />
+                          <TextInput size="xs" label={t("properties.logFile")} value={projectForm.logFile} disabled={isPropertiesLocked} onChange={(event) => handleProjectFieldChange("logFile", event.currentTarget.value)} />
+                        </Stack>
+                      </Accordion.Panel>
+                    </Accordion.Item>
+                  </Accordion>
+                </Stack>
+              ) : selected && form ? (
                 <Stack gap="xs" pb="md">
                   <TextInput
                     size="sm"
@@ -735,6 +1158,38 @@ export default function App() {
                     chevronPosition="left"
                     variant="contained"
                   >
+                    {false && projectForm && (
+                      <Accordion.Item value="project">
+                        <Accordion.Control>{t("properties.groupProject")}</Accordion.Control>
+                        <Accordion.Panel>
+                          <Stack gap="xs">
+                            <Switch
+                              size="sm"
+                              label={t("properties.parallelScan")}
+                              checked={projectForm.parallelScan}
+                              disabled={isPropertiesLocked}
+                              onChange={(event) => handleProjectFieldChange("parallelScan", event.currentTarget.checked)}
+                            />
+                            <Switch
+                              size="sm"
+                              label={t("properties.cleanupEmptyDirs")}
+                              checked={projectForm.cleanupEmptyDirs}
+                              disabled={isPropertiesLocked}
+                              onChange={(event) => handleProjectFieldChange("cleanupEmptyDirs", event.currentTarget.checked)}
+                            />
+                            <Textarea size="xs" label={t("properties.include")} autosize minRows={1} value={projectForm.include} disabled={isPropertiesLocked} onChange={(event) => handleProjectFieldChange("include", event.currentTarget.value)} />
+                            <Textarea size="xs" label={t("properties.exclude")} autosize minRows={1} value={projectForm.exclude} disabled={isPropertiesLocked} onChange={(event) => handleProjectFieldChange("exclude", event.currentTarget.value)} />
+                            <Textarea size="xs" label={t("properties.textExtensions")} autosize minRows={1} value={projectForm.textExtensions} disabled={isPropertiesLocked} onChange={(event) => handleProjectFieldChange("textExtensions", event.currentTarget.value)} />
+                            <Textarea size="xs" label={t("properties.mediaExtensions")} autosize minRows={1} value={projectForm.mediaExtensions} disabled={isPropertiesLocked} onChange={(event) => handleProjectFieldChange("mediaExtensions", event.currentTarget.value)} />
+                            <NumberInput size="xs" label={t("properties.scanChunk")} min={1} value={projectForm.scanChunk} disabled={isPropertiesLocked} onChange={(value) => handleProjectFieldChange("scanChunk", value)} />
+                            <NumberInput size="xs" label={t("properties.analyzeChunk")} min={1} value={projectForm.analyzeChunk} disabled={isPropertiesLocked} onChange={(value) => handleProjectFieldChange("analyzeChunk", value)} />
+                            <Select size="xs" label={t("properties.logLevel")} data={["normal", "verbose", "laconic"]} value={projectForm.logLevel} disabled={isPropertiesLocked} onChange={(value) => handleProjectFieldChange("logLevel", value || "normal")} />
+                            <Switch size="sm" label={t("properties.logTimestamps")} checked={projectForm.logTimestamps} disabled={isPropertiesLocked} onChange={(event) => handleProjectFieldChange("logTimestamps", event.currentTarget.checked)} />
+                            <TextInput size="xs" label={t("properties.logFile")} value={projectForm.logFile} disabled={isPropertiesLocked} onChange={(event) => handleProjectFieldChange("logFile", event.currentTarget.value)} />
+                          </Stack>
+                        </Accordion.Panel>
+                      </Accordion.Item>
+                    )}
                     <Accordion.Item value="connection">
                       <Accordion.Control>{t("properties.groupConnection")}</Accordion.Control>
                       <Accordion.Panel>
@@ -818,6 +1273,34 @@ export default function App() {
                       <Accordion.Control>{t("properties.groupSidecar")}</Accordion.Control>
                       <Accordion.Panel>
                         <Stack gap="xs">
+                          <Switch
+                            size="sm"
+                            label={t("properties.dryRun")}
+                            checked={Boolean(runOptions[selected.id]?.dryRun)}
+                            disabled={isPropertiesLocked}
+                            onChange={(event) => handleRunOptionChange(selected.id, "dryRun", event.currentTarget.checked)}
+                          />
+                          <Switch
+                            size="sm"
+                            label={t("properties.sidecarUpload")}
+                            checked={Boolean(runOptions[selected.id]?.sidecarUpload)}
+                            disabled={isPropertiesLocked}
+                            onChange={(event) => handleRunOptionChange(selected.id, "sidecarUpload", event.currentTarget.checked)}
+                          />
+                          <Switch
+                            size="sm"
+                            label={t("properties.sidecarDownload")}
+                            checked={Boolean(runOptions[selected.id]?.sidecarDownload)}
+                            disabled={isPropertiesLocked}
+                            onChange={(event) => handleRunOptionChange(selected.id, "sidecarDownload", event.currentTarget.checked)}
+                          />
+                          <Switch
+                            size="sm"
+                            label={t("properties.skipSync")}
+                            checked={Boolean(runOptions[selected.id]?.skipSync)}
+                            disabled={isPropertiesLocked}
+                            onChange={(event) => handleRunOptionChange(selected.id, "skipSync", event.currentTarget.checked)}
+                          />
                           <TextInput
                             size="xs"
                             label={t("properties.sidecarLocalRoot")}
@@ -852,6 +1335,32 @@ export default function App() {
                     disabled={isPropertiesLocked}
                     onChange={(e) => handleFieldChange("sidecarDownloadList", e.currentTarget.value)}
                   />
+                        </Stack>
+                      </Accordion.Panel>
+                    </Accordion.Item>
+
+                    <Accordion.Item value="jobFiles">
+                      <Accordion.Control>{t("properties.groupJobFiles")}</Accordion.Control>
+                      <Accordion.Panel>
+                        <Stack gap="sm">
+                          <Stack gap={2}>
+                            <Text size="xs" fw={500}>{t("properties.logFile")}</Text>
+                            <Text size="xs" c="dimmed" style={{ overflowWrap: "anywhere" }}>{jobFiles?.log?.path || "-"}</Text>
+                            <Group gap={4}>
+                              <Tooltip label={t("properties.showFile")}><ActionIcon size="sm" variant="light" disabled={!jobFiles?.log?.exists} onClick={() => window.sftpPushSync.showJobFile(jobFiles.log.path)}><IconFolderOpen size={15} /></ActionIcon></Tooltip>
+                              <Tooltip label={t("properties.openLogFile")}><ActionIcon size="sm" variant="light" disabled={!jobFiles?.log?.exists} onClick={() => window.sftpPushSync.openJobFile(jobFiles.log.path)}><IconFileText size={15} /></ActionIcon></Tooltip>
+                              <Text size="xs" c="dimmed">{formatFileInfo(jobFiles?.log)}</Text>
+                            </Group>
+                          </Stack>
+                          <Stack gap={2}>
+                            <Text size="xs" fw={500}>{t("properties.cacheFile")}</Text>
+                            <Text size="xs" c="dimmed" style={{ overflowWrap: "anywhere" }}>{jobFiles?.cache?.path || "-"}</Text>
+                            <Group gap={4}>
+                              <Tooltip label={t("properties.showFile")}><ActionIcon size="sm" variant="light" disabled={!jobFiles?.cache?.exists} onClick={() => window.sftpPushSync.showJobFile(jobFiles.cache.path)}><IconFolderOpen size={15} /></ActionIcon></Tooltip>
+                              <Tooltip label={t("properties.deleteCache")}><ActionIcon size="sm" color="red" variant="light" disabled={!jobFiles?.cache?.exists || isPropertiesLocked} onClick={handleDeleteCache}><IconTrash size={15} /></ActionIcon></Tooltip>
+                              <Text size="xs" c="dimmed">{formatFileInfo(jobFiles?.cache)}</Text>
+                            </Group>
+                          </Stack>
                         </Stack>
                       </Accordion.Panel>
                     </Accordion.Item>

@@ -18,8 +18,9 @@ const LABEL_WIDTH = 11;
  * hier ein Spinner statt eines Fortschrittsbalkens.
  */
 export class ScanProgressController {
-  constructor({ writeLogLine, maxVisibleSlots = 3 } = {}) {
+  constructor({ writeLogLine, onUpdate, maxVisibleSlots = 3 } = {}) {
     this.writeLogLine = writeLogLine || (() => {});
+    this.onUpdate = onUpdate || (() => {});
     this.maxVisibleSlots = Math.max(1, Number(maxVisibleSlots) || 3);
     this.channels = new Map(); // id -> { label, current, total, lastRel }
     this.slots = new Map(); // id -> Map<slotIndex, currentPath>
@@ -83,6 +84,7 @@ export class ScanProgressController {
     );
 
     this.channels.set(id, data);
+    this.onUpdate({ type: "scan-progress", channel: id, ...data });
     if (!this.enabled) return;
     this.start();
     this.requestRender();
@@ -99,6 +101,16 @@ export class ScanProgressController {
       channelSlots.delete(slotIndex);
     }
 
+    this.onUpdate({
+      type: "scan-worker",
+      channel: id,
+      slotIndex,
+      path: currentPath || "",
+      current,
+      total,
+      active: Boolean(currentPath),
+    });
+
     if (!this.enabled) return;
     this.start();
     this.requestRender(current === 0 || (total > 0 && current >= total));
@@ -111,6 +123,10 @@ export class ScanProgressController {
   }
 
   done(id) {
+    const channel = this.channels.get(id);
+    if (channel) {
+      this.onUpdate({ type: "scan-complete", channel: id, ...channel });
+    }
     this.channels.delete(id);
     this.slots.delete(id);
     if (this.channels.size === 0) {

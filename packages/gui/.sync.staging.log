@@ -1,0 +1,24 @@
+[2026-09-10 22:41:47.331] 
+=================================================================
+[2026-09-10 22:41:47.332] 🔐 SFTP Push-Synchronisation: sftp-push-sync  v4.0.0
+[2026-09-10 22:41:47.332]    LogLevel: verbose (timestamps enabled)
+[2026-09-10 22:41:47.332]    Connection: staging
+[2026-09-10 22:41:47.332]    Worker upload/delete: 20
+[2026-09-10 22:41:47.332]    Worker remote list: 20
+[2026-09-10 22:41:47.332]    Host: fileserver02:22
+[2026-09-10 22:41:47.332]    Local: /Users/cnichte/develop-software/01-active/sftp-push-sync/production/sftp-push-sync/packages/gui/public
+[2026-09-10 22:41:47.332]    Remote: /webseiten/carsten-nichte-de/
+[2026-09-10 22:41:47.332]    Mode: DRY-RUN (no changes)
+[2026-09-10 22:41:47.332]    Cleanup empty dirs: enabled
+[2026-09-10 22:41:47.332]    LogFile: /Users/cnichte/develop-software/01-active/sftp-push-sync/production/sftp-push-sync/packages/gui/.sync.staging.log
+[2026-09-10 22:41:47.332] ─────────────────────────────────────────────────────────────────
+[2026-09-10 22:41:47.332] 
+[2026-09-10 22:41:47.332] 🔌 Connecting to SFTP server …
+[2026-09-10 22:41:47.756]    ✔ Connected to SFTP.
+[2026-09-10 22:41:47.757] [ERROR] ❌ Synchronisation error: Local root does not exist: /Users/cnichte/develop-software/01-active/sftp-push-sync/production/sftp-push-sync/packages/gui/public
+[2026-09-10 22:41:47.757] [ERROR] SftpPushSyncConfigError: Local root does not exist: /Users/cnichte/develop-software/01-active/sftp-push-sync/production/sftp-push-sync/packages/gui/public
+    at SftpPushSyncApp.run (file:///Users/cnichte/develop-software/01-active/sftp-push-sync/production/sftp-push-sync/packages/core/src/core/SftpPushSyncApp.mjs:1544:15)
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+[2026-09-10 22:41:47.767]    ✔ Connection closed.
+[2026-09-10 22:41:47.767] =================================================================
+[2026-09-10 22:41:47.767] 

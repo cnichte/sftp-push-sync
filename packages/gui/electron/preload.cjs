@@ -6,6 +6,13 @@ const { contextBridge, ipcRenderer, webUtils } = require("electron");
 contextBridge.exposeInMainWorld("sftpPushSync", {
   appVersion: process.env.npm_package_version || "0.0.0",
   listConnections: () => ipcRenderer.invoke("list-connections"),
+  getProjectSettings: (configPath) => ipcRenderer.invoke("get-project-settings", configPath),
+  updateProjectSettings: (configPath, settings) =>
+    ipcRenderer.invoke("update-project-settings", { configPath, settings }),
+  getJobFiles: (configPath, name) => ipcRenderer.invoke("get-job-files", { configPath, name }),
+  showJobFile: (filePath) => ipcRenderer.invoke("show-job-file", filePath),
+  openJobFile: (filePath) => ipcRenderer.invoke("open-job-file", filePath),
+  deleteJobCache: (filePath) => ipcRenderer.invoke("delete-job-cache", filePath),
   updateConnection: (configPath, name, updates) =>
     ipcRenderer.invoke("update-connection", { configPath, name, updates }),
   pickNewConfigLocation: () => ipcRenderer.invoke("pick-new-config-location"),
@@ -20,11 +27,18 @@ contextBridge.exposeInMainWorld("sftpPushSync", {
   startJob: (connection, flags, cols, rows) =>
     ipcRenderer.invoke("start-job", { connection, flags, cols, rows }),
   abortJob: (id) => ipcRenderer.invoke("abort-job", { id }),
+  getJobHistory: (connectionId) => ipcRenderer.invoke("get-job-history", connectionId),
+  getProjectJobHistory: (configPath) => ipcRenderer.invoke("get-project-job-history", configPath),
   resizeJob: (id, cols, rows) => ipcRenderer.send("resize-job", { id, cols, rows }),
   onJobData: (callback) => {
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on("job-data", listener);
     return () => ipcRenderer.removeListener("job-data", listener);
+  },
+  onJobEvent: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on("job-event", listener);
+    return () => ipcRenderer.removeListener("job-event", listener);
   },
   onJobExit: (callback) => {
     const listener = (_event, payload) => callback(payload);

@@ -118,6 +118,9 @@ export class SftpPushSyncApp {
 
     // Logging-Callback (Konsole ist Sache des Aufrufers, z.B. der CLI)
     this.onLog = typeof options.onLog === "function" ? options.onLog : defaultOnLog;
+    this.onEvent = typeof options.onEvent === "function" ? options.onEvent : () => {};
+    this.structuredOutput = Boolean(options.structuredOutput);
+    this.lastEventAt = new Map();
 
     // Konfiguration
     this.configRaw = null;
@@ -200,6 +203,32 @@ export class SftpPushSyncApp {
 
   log(...msg) {
     this._consoleAndLog("", "info", ...msg);
+  }
+
+  emitEvent(type, payload = {}) {
+    this.onEvent({ type, ts: Date.now(), ...payload });
+  }
+
+  emitThrottledEvent(type, payload = {}, { interval = 100, force = false } = {}) {
+    const now = Date.now();
+    const last = this.lastEventAt.get(type) || 0;
+    if (!force && now - last < interval) return;
+    this.lastEventAt.set(type, now);
+    this.emitEvent(type, payload);
+  }
+
+  async yieldForUi() {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+
+  async raceAbort(work) {
+    const signal = this.options.signal;
+    if (!signal) return work;
+    if (signal.aborted) throw new Error("Sync aborted.");
+    return Promise.race([
+      work,
+      new Promise((_, reject) => signal.addEventListener("abort", () => reject(new Error("Sync aborted.")), { once: true })),
+    ]);
   }
 
   elog(...msg) {
@@ -472,8 +501,12 @@ export class SftpPushSyncApp {
     this._writeLogFile(
       `[progress] ${base}${rel ? " – " + rel : ""}`
     );
+    this.emitThrottledEvent("progress", { label: prefix.trim(), current, total, path: rel, unit: suffix }, {
+      force: Boolean(total && current >= total),
+    });
 
     if (!process.stdout.isTTY) {
+      if (this.structuredOutput) return;
       if (total && total > 0) {
         const percent = ((current / total) * 100).toFixed(1);
         this.log(
@@ -670,6 +703,7 @@ export class SftpPushSyncApp {
 
   async runTasks(items, workerCount, handler, label = "Tasks", sftp = null) {
     if (!items || items.length === 0) return;
+    const abortSignal = this.options.signal;
 
     const total = items.length;
     let done = 0;
@@ -687,6 +721,7 @@ export class SftpPushSyncApp {
       completedPaths: [],
     });
     this.progressMetrics.start(metricName);
+    this.emitEvent("task-start", { label, current: 0, total, workers: actualWorkers });
 
     // Mutex for reconnection (only one worker reconnects at a time)
     let reconnecting = false;
@@ -695,6 +730,7 @@ export class SftpPushSyncApp {
     const worker = async () => {
       // eslint-disable-next-line no-constant-condition
       while (true) {
+        if (abortSignal?.aborted) throw new Error("Sync aborted.");
         const i = index;
         if (i >= total) break;
         index += 1;
@@ -704,6 +740,7 @@ export class SftpPushSyncApp {
         const maxRetries = 5; // Increased from 2 to 5 for unstable servers
 
         while (retries <= maxRetries) {
+          if (abortSignal?.aborted) throw new Error("Sync aborted.");
           try {
             await handler(item);
             break; // Success, exit retry loop
@@ -727,6 +764,7 @@ export class SftpPushSyncApp {
                 this.log(`${TAB_A}${pc.dim(`Worker waiting for reconnect (${reconnectWaiters} waiting)…`)}`);
               }
               while (reconnecting && waitCount < 120) { // Max 60 seconds wait
+                if (abortSignal?.aborted) throw new Error("Sync aborted.");
                 await new Promise(r => setTimeout(r, 500));
                 waitCount++;
                 // Log every 10 seconds while waiting
@@ -758,8 +796,10 @@ export class SftpPushSyncApp {
               if (this.isVerbose) {
                 this.log(`${TAB_A}${pc.dim(`Retry ${retries}/${maxRetries} for: ${item.rel || ''} (waiting ${retryDelay}ms)`)}`);
               }
-              // Brief pause before retry
-              await new Promise(r => setTimeout(r, retryDelay));
+              await Promise.race([
+                new Promise((resolve) => setTimeout(resolve, retryDelay)),
+                new Promise((_, reject) => abortSignal?.addEventListener("abort", () => reject(new Error("Sync aborted.")), { once: true })),
+              ]);
               // Retry the same item
               continue;
             }
@@ -785,6 +825,14 @@ export class SftpPushSyncApp {
           files: done,
           bytes: completedBytes,
         });
+        this.emitEvent("task-progress", {
+          label,
+          current: done,
+          total,
+          bytes: completedBytes,
+          path: item?.rel || item?.remotePath || "",
+          failed: failedCount,
+        });
         if (done === 1 || done % 10 === 0 || done === total) {
           await this._writeRecoveryState("running", "apply changes", {
             task: label,
@@ -808,6 +856,7 @@ export class SftpPushSyncApp {
       files: done,
       bytes: completedBytes,
     });
+    this.emitEvent("task-complete", { label, current: done, total, bytes: completedBytes, failed: failedCount });
 
     // Return statistics
     return { total, done, failed: failedCount };
@@ -1224,6 +1273,8 @@ export class SftpPushSyncApp {
       checkResumeSupport = false,
       cliLogLevel = null,
       configPath,
+      workerUpload,
+      workerList,
       version = pkg.version,
     } = this.options;
 
@@ -1235,6 +1286,7 @@ export class SftpPushSyncApp {
     if (!fs.existsSync(cfgPath)) {
       throw new SftpPushSyncConfigError(`Configuration file missing: ${cfgPath}`);
     }
+    const configDir = path.dirname(cfgPath);
 
     // Config laden
     let configRaw;
@@ -1275,9 +1327,9 @@ export class SftpPushSyncApp {
       port: targetConfig.port ?? 22,
       user: targetConfig.user,
       password: targetConfig.password,
-      localRoot: path.resolve(syncCfg.localRoot),
+      localRoot: path.resolve(configDir, syncCfg.localRoot),
       remoteRoot: syncCfg.remoteRoot,
-      sidecarLocalRoot: path.resolve(sidecarCfg.localRoot ?? syncCfg.localRoot),
+      sidecarLocalRoot: path.resolve(configDir, sidecarCfg.localRoot ?? syncCfg.localRoot),
       sidecarRemoteRoot: sidecarCfg.remoteRoot ?? syncCfg.remoteRoot,
       workers: targetConfig.workerUpload ?? targetConfig.worker ?? 2,
       workerList: targetConfig.workerList ?? 5,
@@ -1297,7 +1349,7 @@ export class SftpPushSyncApp {
     const PROGRESS = configRaw.progress ?? {};
     this.scanChunk = PROGRESS.scanChunk ?? (this.isVerbose ? 1 : 100);
     this.analyzeChunk = PROGRESS.analyzeChunk ?? (this.isVerbose ? 1 : 10);
-    this.parallelScan = PROGRESS.parallelScan ?? true;
+    this.parallelScan = configRaw.parallelScan ?? true;
 
     this.cleanupEmptyDirsEnabled = configRaw.cleanupEmptyDirs ?? true;
     this.cleanupEmptyRoots = configRaw.cleanupEmptyRoots ?? false;
@@ -1362,9 +1414,9 @@ export class SftpPushSyncApp {
 
     // Hash-Cache (NDJSON - human-readable, scales to 100k+ files)
     const oldJsonCacheName = targetConfig.syncCache || `.sync-cache.${target}.json`;
-    const oldJsonCachePath = path.resolve(oldJsonCacheName);
-    const ndjsonCachePath = path.resolve(`.sync-cache.${target}.ndjson`);
-    this.recoveryPath = path.resolve(`.sync-recovery.${target}.json`);
+    const oldJsonCachePath = path.resolve(configDir, oldJsonCacheName);
+    const ndjsonCachePath = path.resolve(configDir, `.sync-cache.${target}.ndjson`);
+    this.recoveryPath = path.resolve(configDir, `.sync-recovery.${target}.json`);
 
     // Migrate from old JSON cache if exists
     const migration = await migrateFromJsonCache(oldJsonCachePath, ndjsonCachePath, target);
@@ -1382,6 +1434,7 @@ export class SftpPushSyncApp {
     const DEFAULT_LOG_FILE = `.sync.${target}.log`;
     const rawLogFilePattern = configRaw.logFile || DEFAULT_LOG_FILE;
     const logFile = path.resolve(
+      configDir,
       rawLogFilePattern.replace("{target}", target)
     );
     this.logger = new SyncLogger(logFile, { enableTimestamps: this.logTimestamps });
@@ -1494,6 +1547,8 @@ export class SftpPushSyncApp {
       }
       this.log("");
       this.log(pc.cyan("🔌 Connecting to SFTP server …"));
+      this.emitEvent("phase", { name: "connecting", label: "Verbindung wird hergestellt" });
+      await this.yieldForUi();
       await sftp.connect({
         host: this.connection.host,
         port: this.connection.port,
@@ -1508,6 +1563,7 @@ export class SftpPushSyncApp {
         retry_minTimeout: 2000,
       });
       connected = true;
+      this.emitEvent("phase", { name: "connected", label: "Mit SFTP-Server verbunden" });
 
       // Increase max listeners for parallel operations
       if (sftp.client) {
@@ -1555,6 +1611,16 @@ export class SftpPushSyncApp {
 
       // Phase 1 + 2 – Scan
       currentPhase = "scan local and remote";
+      this.emitEvent("phase", {
+        name: "scan",
+        label: "Lokale und Remote-Dateien scannen",
+        localWorkers: 1,
+        remoteWorkers: this.connection.workerList,
+        parallel: this.parallelScan,
+        configPath: cfgPath,
+        connection: target,
+      });
+      await this.yieldForUi();
       await this._writeRecoveryState("running", currentPhase);
       this.log("");
       this.log(
@@ -1569,6 +1635,13 @@ export class SftpPushSyncApp {
 
       const scanProgress = new ScanProgressController({
         writeLogLine: (line) => this._writeLogFile(line),
+        onUpdate: (event) => {
+          if (event.type === "scan-progress") {
+            this.emitThrottledEvent(event.type, event, { force: Boolean(event.total && !event.lastRel) });
+          } else {
+            this.emitEvent(event.type, event);
+          }
+        },
         maxVisibleSlots: this.isVerbose ? this.connection.workerList : 3,
       });
 
@@ -1583,6 +1656,7 @@ export class SftpPushSyncApp {
           progress: scanProgress,
           scanChunk: this.scanChunk,
           log: (msg) => this.log(msg),
+          signal: abortSignal,
         });
         const bytes = [...result.values()].reduce(
           (sum, file) => sum + Number(file.size || 0),
@@ -1597,12 +1671,14 @@ export class SftpPushSyncApp {
 
       const runRemoteScan = async () => {
         this.progressMetrics.start("remote listing");
+        this.emitEvent("scan-workers", { count: this.connection.workerList });
         const result = await walkRemote(sftp, this.connection.remoteRoot, {
           filterFn: (rel) => this.isIncluded(rel),
           progress: scanProgress,
           scanChunk: this.scanChunk,
           log: (msg) => this.log(msg),
           concurrency: this.connection.workerList,
+          signal: abortSignal,
         });
         const bytes = [...result.files.values()].reduce(
           (sum, file) => sum + Number(file.size || 0),
@@ -1619,13 +1695,13 @@ export class SftpPushSyncApp {
       let remoteScan;
 
       if (this.parallelScan) {
-        [local, remoteScan] = await Promise.all([
+        [local, remoteScan] = await this.raceAbort(Promise.all([
           runLocalScan(),
           runRemoteScan(),
-        ]);
+        ]));
       } else {
-        local = await runLocalScan();
-        remoteScan = await runRemoteScan();
+        local = await this.raceAbort(runLocalScan());
+        remoteScan = await this.raceAbort(runRemoteScan());
       }
 
       const remote = remoteScan.files;
@@ -1650,6 +1726,8 @@ export class SftpPushSyncApp {
 
       // Phase 3 – Analyse Differences (delegiert an Helper)
       currentPhase = "compare and decide";
+      this.emitEvent("phase", { name: "compare", label: "Änderungen vergleichen" });
+      await this.yieldForUi();
       await this._writeRecoveryState("running", currentPhase);
       this.log(pc.bold(pc.cyan("🔎 Phase 3: Compare & Decide …")));
       this.progressMetrics.start("compare");
@@ -1666,12 +1744,19 @@ export class SftpPushSyncApp {
             getLocalHash,
             getRemoteHash,
             analyzeChunk: this.analyzeChunk,
+            concurrency: this.connection.workers,
             sizeOnly,
             updateProgress: (prefix, current, total, rel) => {
               this.batchProgress.clear();
               this.updateProgress2(prefix, current, total, rel, "Files");
             },
             updateBatchProgress: ({ current, total, jobs, force = false }) => {
+              this.emitThrottledEvent("compare-progress", {
+                label: "Inhalte vergleichen",
+                current,
+                total,
+                workers: jobs.map((job) => ({ slotIndex: job.slotIndex, path: job.rel, status: job.status, receivedBytes: job.receivedBytes, totalBytes: job.totalBytes })),
+              }, { force: force || current >= total });
               // Kein _clearProgressLine() hier: das würde den MultiBar bei
               // jedem force-Update stoppen/verwerfen und sofort neu aufbauen
               // → Flackern. render() aktualisiert die Bars in-place.
@@ -1729,6 +1814,8 @@ export class SftpPushSyncApp {
 
       // Phase 4 – Remote deletes
       currentPhase = "find remote deletes";
+      this.emitEvent("phase", { name: "plan", label: "Synchronisationsplan" });
+      await this.yieldForUi();
       await this._writeRecoveryState("running", currentPhase);
       this.log("");
       this.log(pc.bold(pc.cyan("🧹 Phase 4: Removing orphaned remote files …")));
@@ -1783,6 +1870,16 @@ export class SftpPushSyncApp {
         `${TAB_A}Estimate: ${this._formatEstimate(workloadEstimate.minSec)}–${this._formatEstimate(workloadEstimate.maxSec)} ` +
         `(rough transfer estimate; ${workloadEstimate.risk})`
       );
+      this.emitEvent("plan", {
+        add: toAdd.length,
+        update: toUpdate.length,
+        delete: toDelete.length,
+        uploadBytes: plannedUploadBytes,
+        localFiles: local.size,
+        remoteFiles: remote.size,
+        estimateMinSec: workloadEstimate.minSec,
+        estimateMaxSec: workloadEstimate.maxSec,
+      });
 
       if (toDelete.length === 0) {
         this.log(`${TAB_A}No orphaned remote files found.`);
@@ -1815,6 +1912,8 @@ export class SftpPushSyncApp {
       // Phase 5 – Apply changes
       if (!dryRun) {
         currentPhase = "apply changes";
+        this.emitEvent("phase", { name: "apply", label: "Änderungen übertragen" });
+        await this.yieldForUi();
         await this._writeRecoveryState("running", currentPhase, {
           plannedAdds: toAdd.length,
           plannedUpdates: toUpdate.length,
@@ -1895,6 +1994,8 @@ export class SftpPushSyncApp {
       // Optional: leere Verzeichnisse aufräumen
       if (!dryRun && this.cleanupEmptyDirsEnabled) {
         currentPhase = "cleanup empty directories";
+        this.emitEvent("phase", { name: "cleanup", label: "Leere Remote-Ordner bereinigen" });
+        await this.yieldForUi();
         await this._writeRecoveryState("running", currentPhase);
         this.log("");
         this.log(
@@ -1973,6 +2074,19 @@ export class SftpPushSyncApp {
 
       this.log("");
       this.log(pc.bold(pc.green("✅ Sync complete.")));
+      this.emitEvent("complete", {
+        ok: true,
+        durationSec,
+        add: toAdd.length,
+        update: toUpdate.length,
+        delete: toDelete.length,
+        addedPaths: toAdd.map((item) => item.rel).sort(),
+        updatedPaths: toUpdate.map((item) => item.rel).sort(),
+        deletedPaths: toDelete.map((item) => item.rel).sort(),
+        folders: { checked: dirsChecked, created: this.dirStats.createdDirs, deleted: this.dirStats.cleanupDeleted },
+        slowestPhase: slowestPhase?.name || null,
+        metrics: [...this.progressMetrics.phases.keys()].map((name) => this.progressMetrics.get(name)).filter(Boolean),
+      });
       await this._clearRecoveryState();
       this.previousRecovery = null;
       return { ok: true, exitCode: 0 };
@@ -1988,6 +2102,13 @@ export class SftpPushSyncApp {
       if (this.isVerbose) {
         this.elog(err?.stack || String(err));
       }
+      this.emitEvent("complete", {
+        ok: false,
+        aborted,
+        phase: currentPhase,
+        error: err?.message || String(err),
+        metrics: [...this.progressMetrics.phases.keys()].map((name) => this.progressMetrics.get(name)).filter(Boolean),
+      });
       try {
         // falls hashCache existiert, Cache schließen
         if (this.hashCache?.close) {

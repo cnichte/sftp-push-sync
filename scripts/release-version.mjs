@@ -22,6 +22,10 @@ if (!validTypes.has(releaseType)) {
   throw new Error("Release-Typ muss patch, minor oder major sein.");
 }
 
+if (!dryRun && !process.env.GH_TOKEN) {
+  throw new Error("GH_TOKEN fehlt. Vor dem Release bitte `export GH_TOKEN=$(gh auth token)` ausführen.");
+}
+
 function run(command, args, options = {}) {
   const output = execFileSync(command, args, {
     cwd: projectRoot,

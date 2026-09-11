@@ -3,7 +3,7 @@ node_modules
 dist
 packages/gui/release
 
-README-dev.md
+README-Release.md
 README-npm-publish.md
 
 TODO-cli.md
@@ -18,3 +18,4 @@ DEBUG-LOG-Passwörter.md
 RECHERCHE-Publizieren.md
 TODO-Publizieren.md
 DEBUG-LOG-Publizieren.md
+

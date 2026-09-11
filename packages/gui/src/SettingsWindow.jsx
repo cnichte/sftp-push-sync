@@ -11,6 +11,7 @@ import {
   Badge,
   Group,
   Select,
+  NumberInput,
 } from "@mantine/core";
 import { IconSettings, IconDownload, IconWorld } from "@tabler/icons-react";
 import i18n from "./i18n.js";
@@ -25,7 +26,7 @@ const STATUS_COLOR = {
   "not-available": "gray",
 };
 
-export default function SettingsWindow({ opened, onClose, initialTab, appInfo, updateState, onUpdate }) {
+export default function SettingsWindow({ opened, onClose, initialTab, appInfo, updateState, onUpdate, historySettings, onHistoryLimitChange, onClearHistory }) {
   const { t } = useTranslation();
   const [tab, setTab] = useState(initialTab || "general");
 
@@ -56,6 +57,9 @@ export default function SettingsWindow({ opened, onClose, initialTab, appInfo, u
           </Tabs.Tab>
           <Tabs.Tab value="updates" leftSection={<IconDownload size={16} />}>
             {t("settings.updates")}
+          </Tabs.Tab>
+          <Tabs.Tab value="history" leftSection={<IconSettings size={16} />}>
+            {t("settings.history")}
           </Tabs.Tab>
         </Tabs.List>
 
@@ -125,7 +129,31 @@ export default function SettingsWindow({ opened, onClose, initialTab, appInfo, u
             </Group>
           </Stack>
         </Tabs.Panel>
+
+        <Tabs.Panel value="history" p="md">
+          <Stack gap="sm">
+            <NumberInput
+              label={t("settings.historyLimit")}
+              min={1}
+              max={100}
+              value={historySettings?.limit || 10}
+              onChange={onHistoryLimitChange}
+            />
+            <Text size="sm" c="dimmed">
+              {t("settings.historyUsage", { count: historySettings?.count || 0, size: formatBytes(historySettings?.bytes || 0) })}
+            </Text>
+            <Button size="xs" variant="light" color="red" onClick={onClearHistory} disabled={!historySettings?.count || historySettings.count <= 1}>
+              {t("settings.clearHistory")}
+            </Button>
+          </Stack>
+        </Tabs.Panel>
       </Tabs>
     </Window>
   );
+}
+
+function formatBytes(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }

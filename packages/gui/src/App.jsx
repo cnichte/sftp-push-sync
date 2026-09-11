@@ -124,6 +124,7 @@ function stripAnsi(value) {
 }
 
 function StructuredJobView({ job, t, lastHistory = null }) {
+  const [now, setNow] = useState(() => Date.now());
   const events = job.events || [];
   const phase = job.phase || [...events].reverse().find((event) => event.type === "phase");
   const progress = job.progress || [...events].reverse().find((event) => ["progress", "task-progress", "scan-progress", "compare-progress"].includes(event.type));
@@ -140,11 +141,19 @@ function StructuredJobView({ job, t, lastHistory = null }) {
     : activePhase === "compare"
       ? compareWorkers
       : [];
+  const isActive = job.status === "running" || job.status === "aborting";
+  const elapsedSeconds = job.startedAt ? Math.max(0, Math.floor((now - job.startedAt) / 1000)) : 0;
+
+  useEffect(() => {
+    if (!isActive || !job.startedAt) return undefined;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [isActive, job.startedAt]);
 
   return (
     <Tabs defaultValue="overview" style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
       <Tabs.List>
-        <Tabs.Tab value="overview">{t("jobView.overview")}</Tabs.Tab>
+        <Tabs.Tab value="overview">{t("jobView.activeRun")}</Tabs.Tab>
         <Tabs.Tab value="log">{t("jobView.log")}</Tabs.Tab>
         {lastHistory && <Tabs.Tab value="lastRun">{t("jobView.lastRun")}</Tabs.Tab>}
       </Tabs.List>
@@ -152,7 +161,11 @@ function StructuredJobView({ job, t, lastHistory = null }) {
         <Stack gap="md">
           <Group justify="space-between">
             <Stack gap={2}>
-              <Text size="sm" fw={600}>{phase?.label || t("jobView.preparing")}{job.mode?.dryRun ? ` | ${t("jobView.dry")}` : ""}</Text>
+              <Text size="sm" fw={600}>
+                {phase?.label || t("jobView.preparing")}
+                {job.mode?.dryRun ? ` | ${t("jobView.dry")}` : ""}
+                {isActive ? ` | ${formatDuration(elapsedSeconds)}` : ""}
+              </Text>
               {progress?.path && <Text size="xs" c="dimmed">{progress.path}</Text>}
             </Stack>
           </Group>
@@ -329,6 +342,7 @@ export default function App() {
   const [settingsTab, setSettingsTab] = useState("general");
   const [aboutOpened, setAboutOpened] = useState(false);
   const [updateState, setUpdateState] = useState({ status: "idle" });
+  const [historySettings, setHistorySettings] = useState({ limit: 10, count: 0, bytes: 0 });
   const [newJobOpened, setNewJobOpened] = useState(false);
   const [newJobTarget, setNewJobTarget] = useState(null); // configPath or "__new__"
   const [newJobNewPath, setNewJobNewPath] = useState(null); // gewählter Speicherort, wenn "__new__"
@@ -373,6 +387,14 @@ export default function App() {
   useEffect(() => {
     reloadConnections();
   }, [reloadConnections]);
+
+  const reloadHistorySettings = useCallback(() => {
+    return window.sftpPushSync?.getHistorySettings().then(setHistorySettings);
+  }, []);
+
+  useEffect(() => {
+    reloadHistorySettings();
+  }, [reloadHistorySettings]);
 
   useEffect(() => {
     const offData = window.sftpPushSync?.onJobData(({ connectionId, log }) => {
@@ -612,7 +634,7 @@ export default function App() {
     }
     setConflict(null);
     setJobs((prev) => ({ ...prev, [conn.id]: {
-      status: "running", connection: conn, events: [], logs: [], phase: null, progress: null,
+      status: "running", connection: conn, startedAt: Date.now(), events: [], logs: [], phase: null, progress: null,
       plan: null, complete: null, mode: { dryRun: flags.includes("--dry-run") }, scanChannels: {}, scanWorkers: {}, scanWorkerCount: null, compareWorkers: [], taskWorkers: null,
     } }));
     focusTab(conn.id);
@@ -1383,6 +1405,9 @@ export default function App() {
         initialTab={settingsTab}
         appInfo={appInfo}
         updateState={updateState}
+        historySettings={historySettings}
+        onHistoryLimitChange={async (limit) => setHistorySettings(await window.sftpPushSync.updateHistoryLimit(limit))}
+        onClearHistory={async () => setHistorySettings(await window.sftpPushSync.clearHistoryExceptLatest())}
         onUpdate={{
           check: () => window.sftpPushSync.checkForUpdates(),
           download: () => window.sftpPushSync.startUpdateDownload(),

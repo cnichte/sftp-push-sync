@@ -24,6 +24,39 @@
 │       │   └── walkers.mjs
 │       └── index.mjs
 └── gui
-    └── package.json
+    ├── .sync-recovery.staging.json
+    ├── .sync.staging.log
+    ├── dist
+    ├── electron
+    │   ├── jobManager.mjs
+    │   ├── main.mjs
+    │   ├── preload.cjs
+    │   ├── settingsStore.mjs
+    │   └── updater.mjs
+    ├── index.html
+    ├── node_modules
+    ├── package.json
+    ├── releases
+    ├── resources
+    │   ├── icon-1024.png
+    │   ├── icon-128.png
+    │   ├── icon-16.png
+    │   ├── icon-256.png
+    │   ├── icon-32.png
+    │   ├── icon-512.png
+    │   ├── icon-64.png
+    │   ├── icon.icns
+    │   ├── icon.ico
+    │   └── icon.png
+    ├── src
+    │   ├── AboutModal.jsx
+    │   ├── App.jsx
+    │   ├── SettingsWindow.jsx
+    │   ├── i18n.js
+    │   ├── locales
+    │   │   ├── de.json
+    │   │   └── en.json
+    │   └── main.jsx
+    └── vite.config.mjs
 
-8 directories, 19 files
+38 directories, 100 files

@@ -7,7 +7,7 @@ import { fileURLToPath } from "url";
 import { createRequire } from "module";
 import winston from "winston";
 import { startJob, abortJob, resizeJob } from "./jobManager.mjs";
-import { initSettingsStore, getConfigPaths, addConfigPath, removeConfigPath, saveJobHistory, getJobHistory, getProjectJobHistory } from "./settingsStore.mjs";
+import { initSettingsStore, getConfigPaths, addConfigPath, removeConfigPath, saveJobHistory, getJobHistory, getProjectJobHistory, getHistorySettings, updateHistoryLimit, clearHistoryExceptLatest } from "./settingsStore.mjs";
 import { initUpdater, checkForUpdates, downloadUpdate, quitAndInstall } from "./updater.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -17,6 +17,14 @@ const DEFAULT_MEDIA_EXTENSIONS = [
   ".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif", ".tif", ".tiff",
   ".mp4", ".mov", ".m4v", ".mp3", ".wav", ".flac",
 ];
+
+function historyLogIsRelevant(log) {
+  const clean = String(log?.line || "").replace(/^\s*\[[^\]]+\]\s*/, "");
+  if (/^\s*(?:dir ok:|directory ok:)/i.test(clean)) return false;
+  return /^\s*[+~-](?:\s|$)/.test(clean)
+    || /\b(?:error|failed|failure|exception|warning|could not|aborted)\b/i.test(clean)
+    || /(?:^|\b)(?:summary|total|performance|metrics?)\s*:/i.test(clean);
+}
 
 // Fallback, solange der Nutzer noch keine sync.config.json registriert hat
 // (siehe DEBUG-LOG-UI.md: Config-Dateien liegen projektweise verstreut).
@@ -478,7 +486,10 @@ ipcMain.handle("start-job", async (event, { connection, flags, cols, rows }) => 
     },
     onEvent: (jobEvent) => {
       if (jobEvent.type === "complete") {
-        saveJobHistory(connection, jobEvent).catch((error) => {
+        saveJobHistory(connection, {
+          ...jobEvent,
+          logs: (jobEvent.logs || []).filter(historyLogIsRelevant),
+        }).catch((error) => {
           logger.warn(`Could not save job history for ${connection.id}: ${error?.message || error}`);
         });
       }
@@ -513,6 +524,10 @@ ipcMain.handle("get-project-job-history", async (_event, configPath) => ({
   ok: true,
   history: await getProjectJobHistory(configPath),
 }));
+
+ipcMain.handle("get-history-settings", async () => getHistorySettings());
+ipcMain.handle("update-history-limit", async (_event, limit) => updateHistoryLimit(limit));
+ipcMain.handle("clear-history-except-latest", async () => clearHistoryExceptLatest());
 
 ipcMain.on("resize-job", (_event, { id, cols, rows }) => {
   resizeJob(id, cols, rows);

@@ -405,11 +405,18 @@ export class SftpPushSyncApp {
         await sftp.rename(temporaryPath, remotePath);
       } catch (renameError) {
         const message = renameError?.message || String(renameError);
-        if (!/already exists|file exists|eexist/i.test(message)) {
+        let targetExists = false;
+        try {
+          targetExists = Boolean(await sftp.exists(remotePath));
+        } catch {
+          // Preserve the original rename error when the existence check fails.
+        }
+        if (!targetExists && !/already exists|file exists|eexist/i.test(message)) {
           throw renameError;
         }
-        // Some servers reject rename() when the target already exists. Move
-        // the old target aside first so a failed replacement can be restored.
+        // Some servers reject rename() when the target already exists and
+        // report only a generic "_rename: Failure". Move the old target aside
+        // first so a failed replacement can be restored.
         await sftp.rename(remotePath, backupPath);
         try {
           await sftp.rename(temporaryPath, remotePath);

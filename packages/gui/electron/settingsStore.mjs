@@ -18,10 +18,11 @@ async function load() {
   try {
     cache = JSON.parse(await fsp.readFile(settingsPath, "utf8"));
   } catch {
-    cache = { configPaths: [], jobHistory: {} };
+    cache = { configPaths: [], jobHistory: {}, historyLimit: 10 };
   }
   if (!Array.isArray(cache.configPaths)) cache.configPaths = [];
   if (!cache.jobHistory || typeof cache.jobHistory !== "object") cache.jobHistory = {};
+  cache.historyLimit = Math.max(1, Math.min(100, Number(cache.historyLimit) || 10));
   return cache;
 }
 
@@ -58,7 +59,7 @@ export async function removeConfigPath(configPath) {
 
 export async function saveJobHistory(connection, summary) {
   const settings = await load();
-  settings.jobHistory[connection.id] = {
+  const entry = {
     connectionId: connection.id,
     configPath: connection.configPath,
     name: connection.name,
@@ -66,18 +67,54 @@ export async function saveJobHistory(connection, summary) {
     completedAt: new Date().toISOString(),
     ...summary,
   };
+  const previous = Array.isArray(settings.jobHistory[connection.id])
+    ? settings.jobHistory[connection.id]
+    : settings.jobHistory[connection.id]
+      ? [settings.jobHistory[connection.id]]
+      : [];
+  settings.jobHistory[connection.id] = [entry, ...previous].slice(0, settings.historyLimit);
   await persist();
-  return settings.jobHistory[connection.id];
+  return entry;
 }
 
 export async function getJobHistory(connectionId) {
   const settings = await load();
-  return settings.jobHistory[connectionId] || null;
+  const history = settings.jobHistory[connectionId];
+  return Array.isArray(history) ? history[0] || null : history || null;
 }
 
 export async function getProjectJobHistory(configPath) {
   const settings = await load();
   return Object.values(settings.jobHistory)
-    .filter((entry) => entry.configPath === configPath)
+    .flatMap((entries) => Array.isArray(entries) ? entries : [entries])
+    .filter((entry) => entry?.configPath === configPath)
     .sort((left, right) => String(right.completedAt).localeCompare(String(left.completedAt)));
+}
+
+export async function getHistorySettings() {
+  const settings = await load();
+  const entries = Object.values(settings.jobHistory).flatMap((history) => Array.isArray(history) ? history : [history]);
+  const bytes = Buffer.byteLength(JSON.stringify(entries), "utf8");
+  return { limit: settings.historyLimit, count: entries.length, bytes };
+}
+
+export async function updateHistoryLimit(limit) {
+  const settings = await load();
+  settings.historyLimit = Math.max(1, Math.min(100, Number(limit) || 10));
+  for (const [connectionId, entries] of Object.entries(settings.jobHistory)) {
+    const history = Array.isArray(entries) ? entries : [entries];
+    settings.jobHistory[connectionId] = history.slice(0, settings.historyLimit);
+  }
+  await persist();
+  return getHistorySettings();
+}
+
+export async function clearHistoryExceptLatest() {
+  const settings = await load();
+  for (const [connectionId, entries] of Object.entries(settings.jobHistory)) {
+    const history = Array.isArray(entries) ? entries : [entries];
+    settings.jobHistory[connectionId] = history.slice(0, 1);
+  }
+  await persist();
+  return getHistorySettings();
 }

@@ -35,7 +35,7 @@
     "conflictOverlapRemote": "Remote folder overlaps with running connection \"{{name}}\": {{path}}"
   },
   "jobView": {
-    "overview": "Overview",
+    "activeRun": "Active run",
     "log": "Log",
     "preparing": "Preparing job",
     "dry": "dry run",
@@ -123,7 +123,11 @@
     "title": "Settings",
     "general": "General",
     "updates": "Updates",
+    "history": "History",
     "language": "Language",
+    "historyLimit": "Runs kept per connection",
+    "historyUsage": "{{count}} runs use {{size}}.",
+    "clearHistory": "Delete history except latest run",
     "currentVersion": "Current version",
     "status": "Status",
     "updateStatus": {

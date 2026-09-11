@@ -29,6 +29,9 @@ contextBridge.exposeInMainWorld("sftpPushSync", {
   abortJob: (id) => ipcRenderer.invoke("abort-job", { id }),
   getJobHistory: (connectionId) => ipcRenderer.invoke("get-job-history", connectionId),
   getProjectJobHistory: (configPath) => ipcRenderer.invoke("get-project-job-history", configPath),
+  getHistorySettings: () => ipcRenderer.invoke("get-history-settings"),
+  updateHistoryLimit: (limit) => ipcRenderer.invoke("update-history-limit", limit),
+  clearHistoryExceptLatest: () => ipcRenderer.invoke("clear-history-except-latest"),
   resizeJob: (id, cols, rows) => ipcRenderer.send("resize-job", { id, cols, rows }),
   onJobData: (callback) => {
     const listener = (_event, payload) => callback(payload);

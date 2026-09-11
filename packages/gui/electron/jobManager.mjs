@@ -16,6 +16,14 @@ function stripAnsi(value) {
     .replace(/\[\d+(?:;\d+)*m/g, "");
 }
 
+function isHistoryLogLine(line) {
+  const clean = stripAnsi(line).replace(/^\s*\[[^\]]+\]\s*/, "");
+  if (/^\s*(?:dir ok:|directory ok:)/i.test(clean)) return false;
+  return /^\s*[+~-](?:\s|$)/.test(clean)
+    || /\b(?:error|failed|failure|exception|warning|could not|aborted)\b/i.test(clean)
+    || /(?:^|\b)(?:summary|total|performance|metrics?)\s*:/i.test(clean);
+}
+
 function pruneStaleJobs() {
   for (const [id, job] of jobs) {
     if (!job?.controller || !job.connection?.id) {
@@ -95,6 +103,7 @@ export function startJob({ connection, flags = [], onData, onEvent, onExit }) {
 
   const controller = new AbortController();
   const logs = [];
+  const historyLogs = [];
   try {
     const options = new Set(flags);
     const mode = { dryRun: options.has("--dry-run") };
@@ -114,9 +123,10 @@ export function startJob({ connection, flags = [], onData, onEvent, onExit }) {
         const log = { level, line: stripAnsi(line), ts: Date.now() };
         logs.push(log);
         if (logs.length > 1_000) logs.shift();
+        if (isHistoryLogLine(log.line)) historyLogs.push(log);
         onData(log);
       },
-      onEvent: (event) => onEvent({ ...event, mode, ...(event.type === "complete" ? { logs } : {}) }),
+      onEvent: (event) => onEvent({ ...event, mode, ...(event.type === "complete" ? { logs: historyLogs } : {}) }),
     });
     jobs.set(connection.id, { controller, connection, mode, startedAt: Date.now() });
     syncApp.run()

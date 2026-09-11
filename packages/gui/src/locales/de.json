@@ -35,7 +35,7 @@
     "conflictOverlapRemote": "Remote-Ordner überschneidet sich mit laufender Verbindung \"{{name}}\": {{path}}"
   },
   "jobView": {
-    "overview": "Übersicht",
+    "activeRun": "Aktueller Lauf",
     "log": "Protokoll",
     "preparing": "Job wird vorbereitet",
     "dry": "dry run",
@@ -123,7 +123,11 @@
     "title": "Einstellungen",
     "general": "Allgemein",
     "updates": "Updates",
+    "history": "Historie",
     "language": "Sprache",
+    "historyLimit": "Aufbewahrte Läufe pro Verbindung",
+    "historyUsage": "{{count}} Läufe belegen {{size}}.",
+    "clearHistory": "Historie bis auf letzten Lauf löschen",
     "currentVersion": "Aktuelle Version",
     "status": "Status",
     "updateStatus": {

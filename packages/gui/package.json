@@ -82,7 +82,8 @@
     "publish": {
       "provider": "github",
       "owner": "cnichte",
-      "repo": "sftp-push-sync"
+      "repo": "sftp-push-sync",
+      "releaseType": "release"
     }
   }
 }

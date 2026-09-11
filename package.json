@@ -19,9 +19,7 @@
     "release:patch": "node scripts/release-version.mjs --type patch",
     "release:minor": "node scripts/release-version.mjs --type minor",
     "release:major": "node scripts/release-version.mjs --type major",
-    "cli-release:patch": "npm run build:noop -w packages/cli && npm version patch -w packages/cli && git push && git push --tags && npm publish --access public -w packages/cli",
-    "cli-release:minor": "npm run build:noop -w packages/cli && npm version minor -w packages/cli && git push && git push --tags && npm publish --access public -w packages/cli",
-    "cli-release:major": "npm run build:noop -w packages/cli && npm version major -w packages/cli && git push && git push --tags && npm publish --access public -w packages/cli",
+    "publish:npm": "npm publish ./packages/core --access public && npm publish ./packages/cli --access public",
     "ncu-me": "ncu -i --format group",
     "tree": "tree -a -L 4 ./packages > directory-structure.txt"
   },

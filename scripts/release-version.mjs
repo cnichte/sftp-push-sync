@@ -41,8 +41,9 @@ function nextVersion(currentVersion) {
   return `${major}.${minor}.${patch + 1}`;
 }
 
-const guiPackagePath = path.join(projectRoot, "packages", "gui", "package.json");
-const currentVersion = JSON.parse(await readFile(guiPackagePath, "utf8")).version;
+const packagePaths = ["core", "cli", "gui"].map((name) => path.join(projectRoot, "packages", name, "package.json"));
+const packageVersions = await Promise.all(packagePaths.map(async (packagePath) => JSON.parse(await readFile(packagePath, "utf8")).version));
+const currentVersion = packageVersions[2];
 const newVersion = nextVersion(currentVersion);
 const changes = run("git", ["status", "--porcelain"]);
 if (changes && !allowDirty) {
@@ -51,20 +52,22 @@ if (changes && !allowDirty) {
 
 if (dryRun) {
   console.log(`[dry-run] Würde CatoPushSync ${currentVersion} auf ${newVersion} (${releaseType}) erhöhen.`);
-  console.log(`[dry-run] Würde packages/gui/package.json und package-lock.json committen.`);
+  console.log(`[dry-run] Würde packages/core/package.json, packages/cli/package.json, packages/gui/package.json und package-lock.json committen.`);
   console.log(`[dry-run] Würde Tag v${newVersion} erstellen und nach origin pushen.`);
   process.exit(0);
 }
 
-run("npm", [
-  "version",
-  releaseType,
-  "--workspace",
-  "@sftp-push-sync/gui",
-  "--no-git-tag-version",
-  "--ignore-scripts",
-], { stdio: "inherit" });
-run("git", ["add", "packages/gui/package.json", "package-lock.json"]);
+for (const workspace of ["packages/core", "packages/cli", "@sftp-push-sync/gui"]) {
+  run("npm", [
+    "version",
+    newVersion,
+    "--workspace",
+    workspace,
+    "--no-git-tag-version",
+    "--ignore-scripts",
+  ], { stdio: "inherit" });
+}
+run("git", ["add", "packages/core/package.json", "packages/cli/package.json", "packages/gui/package.json", "package-lock.json"]);
 run("git", ["commit", "-m", `chore: release CatoPushSync ${newVersion}`], { stdio: "inherit" });
 execFileSync("node", ["scripts/release-tag.mjs", ...(allowDirty ? ["--allow-dirty"] : [])], {
   cwd: projectRoot,

@@ -47,6 +47,8 @@ import {
   IconRestore,
   IconFileText,
   IconTrash,
+  IconChevronRight,
+  IconPlugConnected,
 } from "@tabler/icons-react";
 import SettingsWindow from "./SettingsWindow.jsx";
 import AboutModal from "./AboutModal.jsx";
@@ -123,7 +125,7 @@ function stripAnsi(value) {
     .replace(/\[\d+(?:;\d+)*m/g, "");
 }
 
-function StructuredJobView({ job, t, lastHistory = null }) {
+function StructuredJobView({ job, t, lastHistory = null, historyView = false }) {
   const [now, setNow] = useState(() => Date.now());
   const events = job.events || [];
   const phase = job.phase || [...events].reverse().find((event) => event.type === "phase");
@@ -153,7 +155,7 @@ function StructuredJobView({ job, t, lastHistory = null }) {
   return (
     <Tabs defaultValue="overview" style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
       <Tabs.List>
-        <Tabs.Tab value="overview">{t("jobView.activeRun")}</Tabs.Tab>
+        <Tabs.Tab value="overview">{t(historyView ? "jobView.summary" : "jobView.activeRun")}</Tabs.Tab>
         <Tabs.Tab value="log">{t("jobView.log")}</Tabs.Tab>
         {lastHistory && <Tabs.Tab value="lastRun">{t("jobView.lastRun")}</Tabs.Tab>}
       </Tabs.List>
@@ -270,7 +272,7 @@ function StructuredJobView({ job, t, lastHistory = null }) {
       </Tabs.Panel>
       {lastHistory && (
         <Tabs.Panel value="lastRun" pt="sm" style={{ flex: 1, minHeight: 0 }}>
-          <StructuredJobView job={historyToJob(lastHistory)} t={t} />
+          <StructuredJobView job={historyToJob(lastHistory)} t={t} historyView />
         </Tabs.Panel>
       )}
     </Tabs>
@@ -289,14 +291,14 @@ function historyToJob(history) {
   };
 }
 
-function GroupHistoryView({ history, groupName, t }) {
+function GroupHistoryView({ history, groupName, t, onOpenEntry = () => {} }) {
   return (
     <Stack gap="xs" style={{ flex: 1, minHeight: 0 }}>
       <Text size="sm" fw={600}>{t("jobView.groupHistory", { name: groupName })}</Text>
       <ScrollArea style={{ flex: 1, minHeight: 0 }}>
         <Stack gap={4}>
           {history.map((entry) => (
-            <Group key={entry.connectionId} justify="space-between" p="xs" style={{ border: "1px solid var(--mantine-color-default-border)" }}>
+            <Group key={`${entry.connectionId}:${entry.completedAt}`} justify="space-between" p="xs" style={{ border: "1px solid var(--mantine-color-default-border)" }}>
               <Stack gap={1}>
                 <Text size="sm" fw={500}>{entry.name}</Text>
                 <Text size="xs" c="dimmed">{new Date(entry.completedAt).toLocaleString()}</Text>
@@ -305,6 +307,11 @@ function GroupHistoryView({ history, groupName, t }) {
                 <Text size="xs">{t("jobView.duration", { seconds: formatDuration(entry.durationSec) })}</Text>
                 <Text size="xs">+{entry.add || 0} ~{entry.update || 0} -{entry.delete || 0}</Text>
                 <Badge size="xs" color={entry.ok ? "green" : entry.aborted ? "yellow" : "red"} variant="light">{entry.ok ? t("jobs.status.done") : entry.aborted ? t("jobs.status.aborted") : t("jobs.status.failed")}</Badge>
+                <Tooltip label={t("jobView.openDetails")}>
+                  <ActionIcon size="sm" variant="subtle" aria-label={t("jobView.openDetails")} onClick={() => onOpenEntry(entry)}>
+                    <IconChevronRight size={15} />
+                  </ActionIcon>
+                </Tooltip>
               </Group>
             </Group>
           ))}
@@ -335,6 +342,7 @@ export default function App() {
   const [jobFiles, setJobFiles] = useState(null);
   const [runOptions, setRunOptions] = useState({});
   const [saveError, setSaveError] = useState(null);
+  const [connectionTest, setConnectionTest] = useState({ status: "idle" });
   const [openGroups, setOpenGroups] = useState([]);
   const [openPropertyGroups, setOpenPropertyGroups] = useState(["connection", "sync", "sidecar"]);
   const [appInfo, setAppInfo] = useState(null);
@@ -445,6 +453,15 @@ export default function App() {
 
   const focusTab = (id) => {
     setActiveTab(id);
+  };
+
+  const openHistoryEntry = (entry) => {
+    const id = `history:run:${entry.connectionId}:${entry.completedAt}`;
+    setHistoryTabs((tabs) => [
+      ...tabs.filter((tab) => tab.id !== id),
+      { id, type: "connection", title: `${entry.projectName || entry.configPath} | ${entry.name}`, history: entry },
+    ]);
+    focusTab(id);
   };
 
   const handleSelectConnection = (conn) => {
@@ -648,6 +665,15 @@ export default function App() {
     });
   };
 
+  const handleTestConnection = async () => {
+    if (!selected || !form) return;
+    setConnectionTest({ status: "testing" });
+    const result = await window.sftpPushSync.testConnection({ ...selected, ...form });
+    setConnectionTest(result.ok
+      ? { status: "success", remotePath: result.remotePath }
+      : { status: "error", message: result.error });
+  };
+
   // Play/Stop direkt in der Connection-Zeile — spart den Umweg über die
   // Properties, um einen Job zu starten (siehe DEBUG-LOG-GUI.md).
   const handleQuickStart = (conn, e) => {
@@ -730,6 +756,7 @@ export default function App() {
 
   const jobIds = Object.keys(jobs);
   const hasRunningJobs = Object.values(jobs).some((job) => job.status === "running");
+  const hasOpenHistoryTab = historyTabs.some((tab) => tab.id === activeTab);
   const isPropertiesLocked = selected
     ? ["running", "aborting"].includes(jobs[selected.id]?.status)
     : selectedProject
@@ -977,11 +1004,11 @@ export default function App() {
                   {conflictMessage}
                 </Alert>
               )}
-              {!hasRunningJobs && selected && selectedHistory ? (
-                <StructuredJobView job={historyToJob(selectedHistory)} t={t} />
-              ) : !hasRunningJobs && selectedProject && projectHistory.length > 0 ? (
-                <GroupHistoryView history={projectHistory} groupName={projectForm?.projectName} t={t} />
-              ) : jobIds.length === 0 ? (
+              {!hasRunningJobs && !hasOpenHistoryTab && selected && selectedHistory ? (
+                <StructuredJobView job={historyToJob(selectedHistory)} t={t} historyView />
+              ) : !hasRunningJobs && !hasOpenHistoryTab && selectedProject && projectHistory.length > 0 ? (
+                <GroupHistoryView history={projectHistory} groupName={projectForm?.projectName} t={t} onOpenEntry={openHistoryEntry} />
+              ) : jobIds.length === 0 && !hasOpenHistoryTab ? (
                 <Stack align="center" justify="center" gap="xs" style={{ flex: 1, minHeight: 0 }}>
                   <IconTerminal2 size={32} color="var(--mantine-color-dimmed)" />
                   <Text c="dimmed" ta="center">
@@ -1055,7 +1082,7 @@ export default function App() {
                   ))}
                   {historyTabs.map((tab) => (
                     <Tabs.Panel key={tab.id} value={tab.id} pt="sm" style={{ flex: "1 1 0", minHeight: 0, display: "flex", flexDirection: "column" }}>
-                      {tab.type === "connection" ? <StructuredJobView job={historyToJob(tab.history)} t={t} /> : <GroupHistoryView history={tab.history} groupName={tab.title} t={t} />}
+                      {tab.type === "connection" ? <StructuredJobView job={historyToJob(tab.history)} t={t} historyView /> : <GroupHistoryView history={tab.history} groupName={tab.title} t={t} onOpenEntry={openHistoryEntry} />}
                     </Tabs.Panel>
                   ))}
                 </Tabs>
@@ -1212,10 +1239,26 @@ export default function App() {
                         </Accordion.Panel>
                       </Accordion.Item>
                     )}
-                    <Accordion.Item value="connection">
-                      <Accordion.Control>{t("properties.groupConnection")}</Accordion.Control>
+                    <Accordion.Item value="connection" style={{ position: "relative" }}>
+                      <Accordion.Control style={{ paddingRight: 48 }}>
+                        {t("properties.groupConnection")}
+                      </Accordion.Control>
+                      <Tooltip label={t("properties.testConnection")}>
+                        <ActionIcon
+                          size="sm"
+                          variant="subtle"
+                          aria-label={t("properties.testConnection")}
+                          disabled={isPropertiesLocked || connectionTest.status === "testing"}
+                          onClick={(event) => { event.stopPropagation(); handleTestConnection(); }}
+                          style={{ position: "absolute", top: 7, right: 8, zIndex: 1 }}
+                        >
+                          {connectionTest.status === "testing" ? <Loader size={15} /> : <IconPlugConnected size={16} />}
+                        </ActionIcon>
+                      </Tooltip>
                       <Accordion.Panel>
                         <Stack gap="xs">
+                          {connectionTest.status === "success" && <Alert color="green" py={4}><Text size="xs">{t("properties.testConnectionSuccess", { path: connectionTest.remotePath })}</Text></Alert>}
+                          {connectionTest.status === "error" && <Alert color="red" py={4} withCloseButton onClose={() => setConnectionTest({ status: "idle" })}><Text size="xs">{connectionTest.message}</Text></Alert>}
                           <TextInput
                             size="xs"
                             label={t("properties.description")}

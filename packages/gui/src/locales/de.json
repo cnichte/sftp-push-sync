@@ -36,6 +36,7 @@
   },
   "jobView": {
     "activeRun": "Aktueller Lauf",
+    "summary": "Zusammenfassung",
     "log": "Protokoll",
     "preparing": "Job wird vorbereitet",
     "dry": "dry run",
@@ -55,6 +56,7 @@
     "metricFiles": "{{count}} Dateien",
     "groupHistory": "Letzte Läufe der Gruppe {{name}}",
     "lastRun": "Letzter Lauf",
+    "openDetails": "Details anzeigen",
     "changes": "Änderungen",
     "folders": "Ordner: {{checked}} geprüft, {{created}} erstellt, {{deleted}} gelöscht",
     "scan": {
@@ -79,6 +81,8 @@
     "projectLockedWhileRunning": "In dieser Gruppe läuft ein Job — Einstellungen sind schreibgeschützt, bis er fertig ist.",
     "resetProjectName": "Standardnamen aus dem Ordner wiederherstellen",
     "groupConnection": "Verbindung",
+    "testConnection": "Verbindung testen",
+    "testConnectionSuccess": "Verbindung erfolgreich. Remote-Verzeichnis: {{path}}",
     "groupJobFiles": "Job-Dateien",
     "projectSettings": "Einstellungen",
     "groupSync": "Sync-Verzeichnisse",

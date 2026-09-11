@@ -6,6 +6,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { createRequire } from "module";
 import winston from "winston";
+import SftpClient from "ssh2-sftp-client";
 import { startJob, abortJob, resizeJob } from "./jobManager.mjs";
 import { initSettingsStore, getConfigPaths, addConfigPath, removeConfigPath, saveJobHistory, getJobHistory, getProjectJobHistory, getHistorySettings, updateHistoryLimit, clearHistoryExceptLatest } from "./settingsStore.mjs";
 import { initUpdater, checkForUpdates, downloadUpdate, quitAndInstall } from "./updater.mjs";
@@ -269,6 +270,24 @@ ipcMain.handle("get-project-settings", async (_event, configPath) => {
     };
   } catch (err) {
     return { ok: false, error: err?.message || String(err) };
+  }
+});
+
+ipcMain.handle("test-connection", async (_event, connection) => {
+  const sftp = new SftpClient();
+  try {
+    await sftp.connect({
+      host: connection.host,
+      port: Number(connection.port) || 22,
+      username: connection.user,
+      password: connection.password,
+    });
+    const remotePath = await sftp.cwd();
+    return { ok: true, remotePath };
+  } catch (error) {
+    return { ok: false, error: error?.message || String(error) };
+  } finally {
+    await sftp.end().catch(() => {});
   }
 });
 

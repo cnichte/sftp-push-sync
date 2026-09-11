@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld("sftpPushSync", {
   appVersion: process.env.npm_package_version || "0.0.0",
   listConnections: () => ipcRenderer.invoke("list-connections"),
   getProjectSettings: (configPath) => ipcRenderer.invoke("get-project-settings", configPath),
+  testConnection: (connection) => ipcRenderer.invoke("test-connection", connection),
   updateProjectSettings: (configPath, settings) =>
     ipcRenderer.invoke("update-project-settings", { configPath, settings }),
   getJobFiles: (configPath, name) => ipcRenderer.invoke("get-job-files", { configPath, name }),

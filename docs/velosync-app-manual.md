@@ -1,8 +1,36 @@
 # VeloSync Benutzerhandbuch
 
+Velosync ist spezialisiert auf das hochladen von Dateien auf einen Server über SFTP.
+
+## Was macht VeloSync?
+
+- Neue Dateien hochladen
+- Remote-Dateien löschen, die lokal nicht mehr vorhanden sind
+- Verwaiste Folder löschen
+- Änderungen anhand der Dateigröße oder des geänderten Inhalts identifizieren und hochladen
+
+Zuverlässigkeit war mir extrem wichtig, damit beispielsweise…
+
+- keine verwaisten Dokumente auf dem Server zurückbleiben
+- nur die Teile, die sich tatsächlich geändert haben, aktualisiert werden – nicht mehr und nicht weniger.
+
+Die gängigen FTP-Programme vergleichen in der regel Zeitstempel und Dateigrößen - das war mir viel zu unpräzise. Ich vergleiche Hashes  um wirklich inhaltliche Änderungen auf zu spüren.
+
+### VeloSync arbeitet in 7 Phasen
+
+- Phase 1: Lokale Dateien scannen
+- Phase 2: Remote-Dateien scannen
+- Phase 3: Vergleichen und entscheiden
+- Phase 4: Verwaiste Remote-Dateien entfernen
+- Phase 5: Remote-Verzeichnisse vorbereiten
+- Phase 6: Änderungen übernehmen
+- Phase 7: Leere Remote-Verzeichnisse bereinigen
+
 `VeloSync` ist die Desktop-Anwendung für mein CLI-Tool `sftp-push-sync`.
 
-## Inhaltsverzeichnis
+Wer also seine Webseite zum Beispiel über die IDE VS-Code pflegt, kann seine Uploads direkt über Terminals ansteuern. Wer eine Benutzeroberfläche bevorzugt greift zu VeloSync.
+
+## Inhalt
 
 - [Voraussetzungen](#voraussetzungen)
 - [Erste Verbindung hinzufügen](#erste-verbindung-hinzufügen)

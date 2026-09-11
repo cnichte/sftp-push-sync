@@ -58,7 +58,7 @@ if (changes) {
   console.warn("Warnung: Tag wird trotz lokaler Änderungen erstellt; diese Änderungen sind nicht Teil des Tags.");
 }
 
-git(["tag", "-a", tag, "-m", `VeloSync ${version}`]);
+git(["tag", "-a", tag, "-m", `CatoPushSync ${version}`]);
 try {
   execFileSync("git", ["push", "origin", tag], { cwd: projectRoot, stdio: "inherit" });
 } catch (error) {

@@ -10,8 +10,8 @@ import MarkdownIt from "markdown-it";
 import markdownItAnchor from "markdown-it-anchor";
 import markdownItTocDoneRight from "markdown-it-toc-done-right";
 import { useTranslation } from "react-i18next";
-import germanManual from "../../../docs/velosync-app-manual.de.md?raw";
-import englishManual from "../../../docs/velosync-app-manual.en.md?raw";
+import germanManual from "../../../docs/catopushsync-app-manual.de.md?raw";
+import englishManual from "../../../docs/catopushsync-app-manual.en.md?raw";
 
 const slugifyHeading = (value) => String(value)
   .normalize("NFKD")
@@ -93,27 +93,27 @@ export default function ManualWindow({ opened, onClose }) {
           />
         </Group>
         <style>{`
-          .velosync-manual-toc ul { list-style: none; margin: 0; padding: 0; }
-          .velosync-manual-toc li { margin: 0.25rem 0; }
-          .velosync-manual-toc a { color: var(--mantine-color-dimmed); text-decoration: none; font-size: var(--mantine-font-size-sm); line-height: 1.35; }
-          .velosync-manual-toc a:hover { color: var(--mantine-color-blue-4); text-decoration: underline; }
-          .velosync-manual-content { max-width: 760px; }
-          .velosync-manual-content h1, .velosync-manual-content h2, .velosync-manual-content h3 { scroll-margin-top: 1rem; }
-          .velosync-manual-content h2 { font-size: var(--mantine-font-size-lg); margin: 1.75rem 0 0.6rem; }
-          .velosync-manual-content h3 { font-size: var(--mantine-font-size-md); margin: 1.25rem 0 0.4rem; }
-          .velosync-manual-content p, .velosync-manual-content li { font-size: var(--mantine-font-size-sm); line-height: 1.6; }
-          .velosync-manual-content pre { overflow-x: auto; padding: var(--mantine-spacing-sm); background: var(--mantine-color-dark-7); border-radius: var(--mantine-radius-sm); }
-          .velosync-manual-content code { font-family: var(--mantine-font-family-monospace); }
-          .velosync-manual-content table { border-collapse: collapse; font-size: var(--mantine-font-size-sm); }
-          .velosync-manual-content th, .velosync-manual-content td { border: 1px solid var(--mantine-color-default-border); padding: 0.35rem 0.5rem; }
+          .catopushsync-manual-toc ul { list-style: none; margin: 0; padding: 0; }
+          .catopushsync-manual-toc li { margin: 0.25rem 0; }
+          .catopushsync-manual-toc a { color: var(--mantine-color-dimmed); text-decoration: none; font-size: var(--mantine-font-size-sm); line-height: 1.35; }
+          .catopushsync-manual-toc a:hover { color: var(--mantine-color-blue-4); text-decoration: underline; }
+          .catopushsync-manual-content { max-width: 760px; }
+          .catopushsync-manual-content h1, .catopushsync-manual-content h2, .catopushsync-manual-content h3 { scroll-margin-top: 1rem; }
+          .catopushsync-manual-content h2 { font-size: var(--mantine-font-size-lg); margin: 1.75rem 0 0.6rem; }
+          .catopushsync-manual-content h3 { font-size: var(--mantine-font-size-md); margin: 1.25rem 0 0.4rem; }
+          .catopushsync-manual-content p, .catopushsync-manual-content li { font-size: var(--mantine-font-size-sm); line-height: 1.6; }
+          .catopushsync-manual-content pre { overflow-x: auto; padding: var(--mantine-spacing-sm); background: var(--mantine-color-dark-7); border-radius: var(--mantine-radius-sm); }
+          .catopushsync-manual-content code { font-family: var(--mantine-font-family-monospace); }
+          .catopushsync-manual-content table { border-collapse: collapse; font-size: var(--mantine-font-size-sm); }
+          .catopushsync-manual-content th, .catopushsync-manual-content td { border: 1px solid var(--mantine-color-default-border); padding: 0.35rem 0.5rem; }
         `}</style>
         <Splitter style={{ flex: 1, minHeight: 0, width: "100%", overflow: "hidden" }} orientation="horizontal">
           <Splitter.Pane defaultSize="220px" min="170px" max="360px" style={{ minHeight: 0, overflow: "hidden" }}>
-            <div className="velosync-manual-toc" style={{ height: "100%", minHeight: 0, overflow: "auto", paddingRight: "var(--mantine-spacing-md)", userSelect: "text", WebkitUserSelect: "text" }} dangerouslySetInnerHTML={{ __html: toc }} />
+            <div className="catopushsync-manual-toc" style={{ height: "100%", minHeight: 0, overflow: "auto", paddingRight: "var(--mantine-spacing-md)", userSelect: "text", WebkitUserSelect: "text" }} dangerouslySetInnerHTML={{ __html: toc }} />
           </Splitter.Pane>
           <Splitter.Pane defaultSize={100} min="45%" style={{ minHeight: 0, overflow: "hidden" }}>
             <div style={{ height: "100%", minHeight: 0, overflow: "auto", paddingLeft: "var(--mantine-spacing-lg)", paddingRight: "var(--mantine-spacing-sm)", userSelect: "text", WebkitUserSelect: "text" }}>
-              <div className="velosync-manual-content" onClick={handleClick} dangerouslySetInnerHTML={{ __html: rendered }} />
+              <div className="catopushsync-manual-content" onClick={handleClick} dangerouslySetInnerHTML={{ __html: rendered }} />
             </div>
           </Splitter.Pane>
         </Splitter>

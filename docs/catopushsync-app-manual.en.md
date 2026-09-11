@@ -1,8 +1,8 @@
-# VeloSync User Manual
+# CatoPushSync User Manual
 
-VeloSync is a desktop application for reliable SFTP synchronization from a local project directory to a server. It is available for macOS, Windows, and Linux and is based on the `sftp-push-sync` synchronization engine.
+CatoPushSync is a desktop application for reliable SFTP synchronization from a local project directory to a server. It is available for macOS, Windows, and Linux and is based on the `sftp-push-sync` synchronization engine.
 
-## What does VeloSync do?
+## What does CatoPushSync do?
 
 - Upload new files
 - Delete remote files that no longer exist locally
@@ -14,9 +14,9 @@ VeloSync is a desktop application for reliable SFTP synchronization from a local
 
 Reliability is the central design goal: remote files should not be left behind accidentally, and a synchronization should update only what really changed.
 
-VeloSync does not rely exclusively on timestamps. Text files are compared according to the configured rules; binary files such as images, videos, audio files, and PDFs are checked using SHA-256 hashes. Hashes are stored in a local cache so later runs can be faster.
+CatoPushSync does not rely exclusively on timestamps. Text files are compared according to the configured rules; binary files such as images, videos, audio files, and PDFs are checked using SHA-256 hashes. Hashes are stored in a local cache so later runs can be faster.
 
-### VeloSync phases
+### CatoPushSync phases
 
 1. Connect to the SFTP server
 2. Scan local and remote files
@@ -25,9 +25,9 @@ VeloSync does not rely exclusively on timestamps. Text files are compared accord
 5. Transfer files and delete remote files that no longer exist locally
 6. Clean up empty remote directories
 
-The local and remote scans can run in parallel. During a run, VeloSync displays the active phase, scan channels, workers, progress, elapsed time, and transfer status in a structured view.
+The local and remote scans can run in parallel. During a run, CatoPushSync displays the active phase, scan channels, workers, progress, elapsed time, and transfer status in a structured view.
 
-`VeloSync` is the desktop application for the `sftp-push-sync` CLI tool. If you maintain a website in VS Code, you can start uploads through either the CLI or VeloSync.
+`CatoPushSync` is the desktop application for the `sftp-push-sync` CLI tool. If you maintain a website in VS Code, you can start uploads through either the CLI or CatoPushSync.
 
 ## Contents
 
@@ -35,17 +35,17 @@ ${toc}
 
 ## Requirements
 
-- An installed VeloSync application for macOS, Windows, or Linux
+- An installed CatoPushSync application for macOS, Windows, or Linux
 - A `sync.config.json` in the project directory
 - Credentials for a reachable SFTP server
 
-On macOS, VeloSync may request local network access on first launch. This is required when the SFTP server is on the local network, for example `fileserver02`, `server.local`, or `192.168.x.x`.
+On macOS, CatoPushSync may request local network access on first launch. This is required when the SFTP server is on the local network, for example `fileserver02`, `server.local`, or `192.168.x.x`.
 
 Credentials are read from the current configuration. Passwords are normally stored as plain text in `sync.config.json`; do not commit this file to a public Git repository.
 
 ## Import a connection
 
-1. Open VeloSync.
+1. Open CatoPushSync.
 2. Click the folder icon at the top of the left sidebar and select an existing `sync.config.json`.
 3. Alternatively, drag the file into the connection sidebar.
 4. The connections contained in the file appear grouped by project.
@@ -80,7 +80,7 @@ Use the folder icon beside the configuration path to open the location of `sync.
 
 ## Sidecars
 
-VeloSync normally synchronizes the local sync root to the remote root. Sidecars are separate files or lists that should explicitly be uploaded or downloaded, such as a counter, status file, or server-generated log file.
+CatoPushSync normally synchronizes the local sync root to the remote root. Sidecars are separate files or lists that should explicitly be uploaded or downloaded, such as a counter, status file, or server-generated log file.
 
 Configure the local and remote sidecar roots and the upload and download lists in the **Sidecar** section. List entries are relative paths. A sidecar operation can run together with the normal synchronization or on its own by enabling **Skip normal synchronization**.
 
@@ -89,7 +89,7 @@ Configure the local and remote sidecar roots and the upload and download lists i
 Every connection has a green start button in the connection list.
 
 1. Start the desired connection from the connection list.
-2. VeloSync opens a tab for the job.
+2. CatoPushSync opens a tab for the job.
 3. The tab shows the project and connection, for example `my-project | prod`.
 4. **Current run** displays the phase, elapsed time, scan channels, workers, and progress.
 5. **Log** displays the technical live output.
@@ -106,7 +106,7 @@ A dry run is useful after changing include or exclude patterns, local roots, or 
 
 ## History and logs
 
-After a run, VeloSync stores its summary in the GUI settings store. A history entry includes:
+After a run, CatoPushSync stores its summary in the GUI settings store. A history entry includes:
 
 - Status, duration, and completion time
 - Counts of added, updated, and deleted files
@@ -133,7 +133,7 @@ Every connection has a log file and a hash cache. In the **Job files** section, 
 
 ## Concurrent jobs
 
-VeloSync prevents unsafe concurrent synchronizations:
+CatoPushSync prevents unsafe concurrent synchronizations:
 
 - The same connection can run only once at a time.
 - Two connections cannot access overlapping remote directories at the same time.
@@ -149,11 +149,11 @@ The general application actions are available from the toolbar:
 - **Info**: Show the version, author, website, and runtime information.
 - **Update**: Appears when a new version is available and opens the **Updates** section in Settings.
 
-Updates are downloaded only after confirmation. Once an update is ready, use **Restart and install** to close and update VeloSync.
+Updates are downloaded only after confirmation. Once an update is ready, use **Restart and install** to close and update CatoPushSync.
 
 ## CLI and configuration
 
-VeloSync uses the same configuration as the `sftp-push-sync` CLI. A minimal configuration looks like this:
+CatoPushSync uses the same configuration as the `sftp-push-sync` CLI. A minimal configuration looks like this:
 
 ```json
 {
@@ -212,7 +212,7 @@ This checks append, remote-size verification, read-back, and rename support with
 
 ### Cannot connect to the SFTP server
 
-Check the host, port, username, and password in the connection properties. For local network servers, also check macOS network permission for VeloSync and local firewall rules. The **Test connection** button in the Connection section can verify the current values without changing files.
+Check the host, port, username, and password in the connection properties. For local network servers, also check macOS network permission for CatoPushSync and local firewall rules. The **Test connection** button in the Connection section can verify the current values without changing files.
 
 ### A connection cannot be started
 
@@ -224,13 +224,13 @@ Import the desired `sync.config.json` again using the folder icon or drag it int
 
 ### Upload fails while replacing a file
 
-VeloSync first uploads a file to a temporary remote file and replaces the target only after the transfer succeeds. This protects the existing file from incomplete uploads. Some SFTP servers do not allow a direct rename over an existing file, so VeloSync may first move the old target to a temporary backup and then install the replacement.
+CatoPushSync first uploads a file to a temporary remote file and replaces the target only after the transfer succeeds. This protects the existing file from incomplete uploads. Some SFTP servers do not allow a direct rename over an existing file, so CatoPushSync may first move the old target to a temporary backup and then install the replacement.
 
 If the server also rejects that rename operation, check the SFTP user's write and rename permissions and the server configuration. The `_rename: Failure` message is a generic server error and may indicate either missing permissions or a server restriction on rename operations.
 
 ### A run was interrupted
 
-After a controlled abort or process crash, a `.sync-recovery.<target>.json` file may remain. It records the last active phase and completed paths. On the next run, VeloSync checks affected files again. The recovery file is removed after a successful run.
+After a controlled abort or process crash, a `.sync-recovery.<target>.json` file may remain. It records the last active phase and completed paths. On the next run, CatoPushSync checks affected files again. The recovery file is removed after a successful run.
 
 ### The first run is slow
 

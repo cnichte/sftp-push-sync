@@ -8,7 +8,7 @@ export default function AboutModal({ opened, onClose, appInfo }) {
   return (
     <Modal opened={opened} onClose={onClose} title={t("about.title")} centered size="sm">
       <Stack gap="xs">
-        <Text fw={600}>{appInfo?.name || "VeloSync"}</Text>
+        <Text fw={600}>{appInfo?.name || "CatoPushSync"}</Text>
         <Text size="sm" c="dimmed">
           {t("about.description")}
         </Text>

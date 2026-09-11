@@ -1,7 +1,7 @@
 {
   "name": "@sftp-push-sync/gui",
-  "version": "4.2.1",
-  "description": "VeloSync desktop application for sftp-push-sync",
+  "version": "4.2.2",
+  "description": "CatoPushSync desktop application for sftp-push-sync",
   "type": "module",
   "private": true,
   "main": "electron/main.mjs",
@@ -48,8 +48,8 @@
     "wait-on": "^8.0.1"
   },
   "build": {
-    "appId": "de.carsten-nichte.sftp-push-sync",
-    "productName": "VeloSync",
+    "appId": "de.carsten-nichte.catopushsync",
+    "productName": "CatoPushSync",
     "electronVersion": "32.3.3",
     "directories": {
       "output": "release",
@@ -58,7 +58,7 @@
     "mac": {
       "icon": "resources/icon.icns",
       "extendInfo": {
-        "NSLocalNetworkUsageDescription": "VeloSync benötigt Zugriff auf das lokale Netzwerk, um SFTP-Server zu erreichen."
+        "NSLocalNetworkUsageDescription": "CatoPushSync benötigt Zugriff auf das lokale Netzwerk, um SFTP-Server zu erreichen."
       },
       "target": [
         "dmg",

@@ -50,7 +50,7 @@ if (changes && !allowDirty) {
 }
 
 if (dryRun) {
-  console.log(`[dry-run] Würde VeloSync ${currentVersion} auf ${newVersion} (${releaseType}) erhöhen.`);
+  console.log(`[dry-run] Würde CatoPushSync ${currentVersion} auf ${newVersion} (${releaseType}) erhöhen.`);
   console.log(`[dry-run] Würde packages/gui/package.json und package-lock.json committen.`);
   console.log(`[dry-run] Würde Tag v${newVersion} erstellen und nach origin pushen.`);
   process.exit(0);
@@ -65,7 +65,7 @@ run("npm", [
   "--ignore-scripts",
 ], { stdio: "inherit" });
 run("git", ["add", "packages/gui/package.json", "package-lock.json"]);
-run("git", ["commit", "-m", `chore: release VeloSync ${newVersion}`], { stdio: "inherit" });
+run("git", ["commit", "-m", `chore: release CatoPushSync ${newVersion}`], { stdio: "inherit" });
 execFileSync("node", ["scripts/release-tag.mjs", ...(allowDirty ? ["--allow-dirty"] : [])], {
   cwd: projectRoot,
   stdio: "inherit",

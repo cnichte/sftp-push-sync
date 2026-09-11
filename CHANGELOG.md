@@ -4,15 +4,22 @@
 
 _No changes yet._
 
+## [4.2.2] - 2026-09-12
+
+- Renamed the desktop application from VeloSync to CatoPushSync.
+- Added the new `cato-push-sync` CLI alias while keeping `sftp-push-sync` compatible.
+- Changed the Electron application identity to `de.carsten-nichte.catopushsync`.
+- Rebuilt release artifacts from scratch for the new CatoPushSync application identity.
+
 ## [4.2.1] - 2026-09-11
 
-- Switched the VeloSync auto-update feed and release publishing from the self-hosted generic URL to GitHub Releases (`electron-updater` provider `github`).
-- Removed the website release transport script; VeloSync `4.2.0` was superseded because it was still built against the old generic feed.
+- Switched the CatoPushSync auto-update feed and release publishing from the self-hosted generic URL to GitHub Releases (`electron-updater` provider `github`).
+- Removed the website release transport script; CatoPushSync `4.2.0` was superseded because it was still built against the old generic feed.
 
 ## [4.2.0] - 2026-09-11
 
 - Added the CLI package README and npm repository metadata (published as `sftp-push-sync@4.2.0`).
-- Released VeloSync `4.2.0` for macOS (arm64) and Linux, built from the same codebase as `4.1.0` with no further application changes.
+- Released CatoPushSync `4.2.0` for macOS (arm64) and Linux, built from the same codebase as `4.1.0` with no further application changes.
 
 ## [4.1.0] - 2026-09-11
 
@@ -24,7 +31,7 @@ _No changes yet._
 - Refined path resolution for project-relative local files and configuration-relative log, cache, and recovery files.
 - Refined SFTP error handling for servers with restrictive rename behavior; the atomic upload and recovery mechanisms introduced in `4.0.0` remain unchanged in principle.
 
-### VeloSync application
+### CatoPushSync application
 
 - Added the cross-platform Electron application for macOS, Windows, and Linux.
 - Added structured progress views for phases, local and remote scans, compare workers, upload workers, metrics, plans, and changed paths.
@@ -36,8 +43,8 @@ _No changes yet._
 
 - Added Electron release builds and platform-specific release staging for macOS, Windows, and Linux.
 - Added GitHub Actions support for Linux releases and release transport scripts.
-- Added VeloSync application icons and Windows build documentation.
-- Expanded the German and English VeloSync manuals with configuration, CLI, recovery, cache, SFTP rename, and troubleshooting guidance.
+- Added CatoPushSync application icons and Windows build documentation.
+- Expanded the German and English CatoPushSync manuals with configuration, CLI, recovery, cache, SFTP rename, and troubleshooting guidance.
 
 ## [4.0.0] - 2026-09-10
 

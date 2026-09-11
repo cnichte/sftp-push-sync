@@ -31,9 +31,9 @@ The file `sftp-push-sync.mjs` is pure JavaScript (ESM). Node.js can execute it d
 
 ## News
 
-- Anyone who doesn’t particularly like working via the terminal will soon be able to do the same using the `VeloSync` App. The app will run on Linux, Windows and MacOS.
+- Anyone who doesn’t particularly like working via the terminal will soon be able to do the same using the `CatoPushSync` App. The app will run on Linux, Windows and MacOS.
 
-![Screenshot VeloSync App Benutzeroberfläche](https://github.com/cnichte/sftp-push-sync/blob/main/images/velosync-app-001.jpg?raw=true)
+![Screenshot CatoPushSync App Benutzeroberfläche](https://github.com/cnichte/sftp-push-sync/blob/main/images/catopushsync-app-001.jpg?raw=true)
 
 - With version `4.0.0`, the app is ‘feature complete’, unless I can think of any new features. From now on, there will only be bug fixes, and yea and I’ll sort out the issue of stored passwords in the upcoming releases.
 - I’ve improved the loading-bar and made tons of stability, performance improvements in the latest Updates, [see also CHANGELOG.md](https://github.com/cnichte/sftp-push-sync/blob/main/CHANGELOG.md).

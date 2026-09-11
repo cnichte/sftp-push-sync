@@ -946,7 +946,7 @@ export default function App() {
                 style={{ flexShrink: 0, borderTop: "1px solid var(--mantine-color-default-border)" }}
               >
                 <Text size="xs" fw={600}>
-                  VeloSync{appInfo?.version ? ` v${appInfo.version}` : ""}
+                  CatoPushSync{appInfo?.version ? ` v${appInfo.version}` : ""}
                 </Text>
                 <Group gap={4}>
                   {["available", "downloading", "downloaded"].includes(updateState.status) && (

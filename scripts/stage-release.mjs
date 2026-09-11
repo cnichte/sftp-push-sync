@@ -54,10 +54,10 @@ for (const fileName of ["builder-debug.yml", "builder-effective-config.yaml"]) {
 if (platform === "macos") await rm(path.join(releaseDir, "mac-arm64"), { recursive: true, force: true });
 
 const staleArtifactPattern = platform === "macos"
-  ? /^VeloSync-.*(?:\.dmg|\.zip|\.blockmap)$/
+  ? /^CatoPushSync-.*(?:\.dmg|\.zip|\.blockmap)$/
   : platform === "linux"
-    ? /^VeloSync-.*\.AppImage(?:\.blockmap)?$/
-    : /^VeloSync-.*(?:Setup|portable).*\.exe(?:\.blockmap)?$/;
+    ? /^CatoPushSync-.*\.AppImage(?:\.blockmap)?$/
+    : /^CatoPushSync-.*(?:Setup|portable).*\.exe(?:\.blockmap)?$/;
 for (const entry of await readdir(releaseDir, { withFileTypes: true })) {
   if (entry.name === ".DS_Store" || staleArtifactPattern.test(entry.name)) {
     await rm(path.join(releaseDir, entry.name), { force: true });

@@ -1,4 +1,4 @@
-const DEFAULT_SERVICE = "de.carsten-nichte.velosync";
+const DEFAULT_SERVICE = "de.carsten-nichte.catopushsync";
 
 let keytarPromise;
 

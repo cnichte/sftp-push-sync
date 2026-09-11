@@ -1,6 +1,6 @@
 {
   "app": {
-    "title": "VeloSync"
+    "title": "CatoPushSync"
   },
   "toolbar": {
     "newJob": "New job",
@@ -154,7 +154,7 @@
     "description": "SFTP push synchronization"
   },
   "manual": {
-    "title": "VeloSync User Manual",
+    "title": "CatoPushSync User Manual",
     "description": "Synchronization, connections, and troubleshooting"
   },
   "newJob": {

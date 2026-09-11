@@ -1,6 +1,8 @@
-# sftp-push-sync
+# CatoPushSync CLI
 
 Reliable local-to-remote SFTP synchronization for websites and other project directories. The package mirrors a local directory to an SFTP server, uploads new and changed files, removes remote files that no longer exist locally, and can clean up empty remote directories.
+
+The legacy command `sftp-push-sync` remains available. New installations can also use the product command `cato-push-sync`.
 
 ## Install
 
@@ -84,20 +86,20 @@ Please wait – the GIF will take a few seconds to load...
 
 ![An console output example](https://github.com/cnichte/sftp-push-sync/blob/main/images/sftp-push-sync-run-example.gif)
 
-## VeloSync desktop app
+## CatoPushSync desktop app
 
-VeloSync is the Electron desktop application built on the same sync engine. It provides structured progress views, connection and group management, job history, dry runs, connection testing, sidecar controls, and macOS, Windows, and Linux releases.
+CatoPushSync is the Electron desktop application built on the same sync engine. It provides structured progress views, connection and group management, job history, dry runs, connection testing, sidecar controls, and macOS, Windows, and Linux releases.
 
-- Anyone who doesn’t particularly like working via the terminal will soon be able to do the same using the `VeloSync` App. The app will run on Linux, Windows and MacOS.
+- Anyone who doesn’t particularly like working via the terminal will soon be able to do the same using the `CatoPushSync` App. The app will run on Linux, Windows and MacOS.
 
-![Screenshot VeloSync App Benutzeroberfläche](https://github.com/cnichte/sftp-push-sync/blob/main/images/velosync-app-001.jpg?raw=true)
+![Screenshot CatoPushSync App Benutzeroberfläche](https://github.com/cnichte/sftp-push-sync/blob/main/images/catopushsync-app-001.jpg?raw=true)
 
 ## Documentation
 
-- [VeloSync user manual](https://github.com/cnichte/sftp-push-sync/tree/main/docs)
+- [CatoPushSync user manual](https://github.com/cnichte/sftp-push-sync/tree/main/docs)
 - [Repository](https://github.com/cnichte/sftp-push-sync)
 - [Changelog](https://github.com/cnichte/sftp-push-sync/blob/main/CHANGELOG.md)
-- [VeloSync releases](https://github.com/cnichte/sftp-push-sync/releases)
+- [CatoPushSync releases](https://github.com/cnichte/sftp-push-sync/releases)
 
 ## License
 

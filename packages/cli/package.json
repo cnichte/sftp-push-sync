@@ -4,7 +4,8 @@
   "description": "SFTP sync tool for my Hugo projects (local to remote, with hash cache)",
   "type": "module",
   "bin": {
-    "sftp-push-sync": "bin/sftp-push-sync.mjs"
+    "sftp-push-sync": "bin/sftp-push-sync.mjs",
+    "cato-push-sync": "bin/sftp-push-sync.mjs"
   },
   "scripts": {
     "build:noop": "echo \"nothing to build\""

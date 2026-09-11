@@ -6,6 +6,7 @@
     "newJob": "New job",
     "settings": "Settings",
     "about": "About",
+    "manual": "User manual",
     "updateAvailable": "Update available"
   },
   "sidebar": {
@@ -151,6 +152,10 @@
   "about": {
     "title": "About",
     "description": "SFTP push synchronization"
+  },
+  "manual": {
+    "title": "VeloSync User Manual",
+    "description": "Synchronization, connections, and troubleshooting"
   },
   "newJob": {
     "title": "New job",

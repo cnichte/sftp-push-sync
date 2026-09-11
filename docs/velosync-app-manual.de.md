@@ -36,16 +36,7 @@ Wer seine Webseite zum Beispiel über VS Code pflegt, kann die Uploads direkt ü
 
 ## Inhalt
 
-- [Voraussetzungen](#voraussetzungen)
-- [Erste Verbindung hinzufügen](#erste-verbindung-hinzufügen)
-- [Verbindungen verwalten](#verbindungen-verwalten)
-- [Synchronisation starten und beobachten](#synchronisation-starten-und-beobachten)
-- [Trockenlauf](#trockenlauf)
-- [Historie und Protokolle](#historie-und-protokolle)
-- [Gleichzeitige Jobs](#gleichzeitige-jobs)
-- [Einstellungen, Updates und Info](#einstellungen-updates-und-info)
-- [CLI und Konfiguration](#cli-und-konfiguration)
-- [Fehlerbehebung](#fehlerbehebung)
+${toc}
 
 ## Voraussetzungen
 

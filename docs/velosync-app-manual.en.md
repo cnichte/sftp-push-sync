@@ -31,16 +31,7 @@ The local and remote scans can run in parallel. During a run, VeloSync displays 
 
 ## Contents
 
-- [Requirements](#requirements)
-- [Import a connection](#import-a-connection)
-- [Manage connections](#manage-connections)
-- [Start and monitor a synchronization](#start-and-monitor-a-synchronization)
-- [Dry run](#dry-run)
-- [History and logs](#history-and-logs)
-- [Concurrent jobs](#concurrent-jobs)
-- [Settings, updates, and information](#settings-updates-and-information)
-- [CLI and configuration](#cli-and-configuration)
-- [Troubleshooting](#troubleshooting)
+${toc}
 
 ## Requirements
 

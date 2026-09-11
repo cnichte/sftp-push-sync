@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld("sftpPushSync", {
   getJobFiles: (configPath, name) => ipcRenderer.invoke("get-job-files", { configPath, name }),
   showJobFile: (filePath) => ipcRenderer.invoke("show-job-file", filePath),
   openJobFile: (filePath) => ipcRenderer.invoke("open-job-file", filePath),
+  openExternal: (url) => ipcRenderer.invoke("open-external", url),
   deleteJobCache: (filePath) => ipcRenderer.invoke("delete-job-cache", filePath),
   updateConnection: (configPath, name, updates) =>
     ipcRenderer.invoke("update-connection", { configPath, name, updates }),

@@ -343,6 +343,12 @@ ipcMain.handle("open-job-file", async (_event, filePath) => {
   return error ? { ok: false, error } : { ok: true };
 });
 
+ipcMain.handle("open-external", async (_event, url) => {
+  if (!/^https?:\/\//i.test(String(url))) return { ok: false, error: "Only HTTP(S) URLs are allowed." };
+  await shell.openExternal(String(url));
+  return { ok: true };
+});
+
 ipcMain.handle("delete-job-cache", async (_event, filePath) => {
   try {
     await fs.unlink(filePath);

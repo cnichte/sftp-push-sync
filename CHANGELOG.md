@@ -2,7 +2,32 @@
 
 ## [unpublished]
 
-- UI Introduction: VeloSync App. Will run on MacOS, Linux and Windows.
+_No changes yet._
+
+## [4.1.0] - 2026-09-11
+
+### Core and CLI
+
+- Added structured sync events for phase, scan, compare, task, plan, and completion progress so UI clients can render synchronization state without parsing terminal output.
+- Refined abort handling across local scans, remote scans, worker queues, comparison, and upload operations for the application integration.
+- Exposed explicit upload and listing worker information to structured UI clients while preserving the legacy `worker` setting as a fallback for uploads.
+- Refined path resolution for project-relative local files and configuration-relative log, cache, and recovery files.
+- Refined SFTP error handling for servers with restrictive rename behavior; the atomic upload and recovery mechanisms introduced in `4.0.0` remain unchanged in principle.
+
+### VeloSync application
+
+- Added the cross-platform Electron application for macOS, Windows, and Linux.
+- Added structured progress views for phases, local and remote scans, compare workers, upload workers, metrics, plans, and changed paths.
+- Added connection and group management, drag-and-drop configuration import, conflict detection, controlled job aborts, and rerunnable jobs.
+- Added job history with summaries, relevant change/error lines, configurable retention, storage usage, and cleanup.
+- Added connection testing, dry runs, sidecar options, log/cache actions, update handling, and an embedded German/English user manual.
+
+### Packaging and documentation
+
+- Added Electron release builds and platform-specific release staging for macOS, Windows, and Linux.
+- Added GitHub Actions support for Linux releases and release transport scripts.
+- Added VeloSync application icons and Windows build documentation.
+- Expanded the German and English VeloSync manuals with configuration, CLI, recovery, cache, SFTP rename, and troubleshooting guidance.
 
 ## [4.0.0] - 2026-09-10
 

@@ -49,9 +49,11 @@ import {
   IconTrash,
   IconChevronRight,
   IconPlugConnected,
+  IconBook,
 } from "@tabler/icons-react";
 import SettingsWindow from "./SettingsWindow.jsx";
 import AboutModal from "./AboutModal.jsx";
+import ManualWindow from "./ManualWindow.jsx";
 
 const STATUS_ICON = {
   running: <Loader size={14} />,
@@ -349,6 +351,7 @@ export default function App() {
   const [settingsOpened, setSettingsOpened] = useState(false);
   const [settingsTab, setSettingsTab] = useState("general");
   const [aboutOpened, setAboutOpened] = useState(false);
+  const [manualOpened, setManualOpened] = useState(false);
   const [updateState, setUpdateState] = useState({ status: "idle" });
   const [historySettings, setHistorySettings] = useState({ limit: 10, count: 0, bytes: 0 });
   const [newJobOpened, setNewJobOpened] = useState(false);
@@ -979,6 +982,16 @@ export default function App() {
                       <IconInfoCircle size={16} />
                     </ActionIcon>
                   </Tooltip>
+                  <Tooltip label={t("toolbar.manual")}>
+                    <ActionIcon
+                      variant="subtle"
+                      size="sm"
+                      aria-label={t("toolbar.manual")}
+                      onClick={() => setManualOpened(true)}
+                    >
+                      <IconBook size={16} />
+                    </ActionIcon>
+                  </Tooltip>
                 </Group>
               </Group>
             </div>
@@ -1458,6 +1471,7 @@ export default function App() {
         }}
       />
       <AboutModal opened={aboutOpened} onClose={() => setAboutOpened(false)} appInfo={appInfo} />
+      <ManualWindow opened={manualOpened} onClose={() => setManualOpened(false)} />
 
       <Modal opened={newJobOpened} onClose={() => setNewJobOpened(false)} title={t("newJob.title")}>
         <Stack gap="sm">

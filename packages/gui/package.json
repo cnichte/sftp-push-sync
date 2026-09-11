@@ -1,6 +1,6 @@
 {
   "name": "@sftp-push-sync/gui",
-  "version": "0.1.2",
+  "version": "4.1.0",
   "description": "VeloSync desktop application for sftp-push-sync",
   "type": "module",
   "private": true,
@@ -18,20 +18,23 @@
     "dist:win": "npm run build:renderer && electron-builder --win"
   },
   "dependencies": {
-    "@sftp-push-sync/core": "*",
-    "sftp-push-sync": "*",
     "@gfazioli/mantine-window": "^3.2.0",
     "@mantine/core": "^9.6.1",
     "@mantine/hooks": "^9.6.1",
+    "@sftp-push-sync/core": "^4.1.0",
     "@tabler/icons-react": "^3.19.0",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/xterm": "^5.5.0",
     "electron-updater": "^6.3.9",
     "i18next": "^23.15.1",
+    "markdown-it": "^15.0.2",
+    "markdown-it-anchor": "^10.0.0",
+    "markdown-it-toc-done-right": "^4.2.0",
     "node-pty": "^1.0.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-i18next": "^15.0.2",
+    "sftp-push-sync": "*",
     "winston": "^3.14.2"
   },
   "devDependencies": {

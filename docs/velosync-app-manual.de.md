@@ -163,35 +163,35 @@ VeloSync verwendet dieselbe Konfiguration wie das CLI `sftp-push-sync`. Eine min
 
 ```json
 {
-	"connections": {
-		"staging": {
-			"host": "sftp.example.net",
-			"port": 22,
-			"user": "sftp-user",
-			"password": "nicht-in-git-speichern",
-			"workerUpload": 3,
-			"workerList": 5,
-			"sync": {
-				"localRoot": "public",
-				"remoteRoot": "/webseite/"
-			},
-			"sidecar": {
-				"localRoot": "sidecar-local",
-				"remoteRoot": "/sidecar/",
-				"uploadList": [],
-				"downloadList": []
-			}
-		}
-	},
-	"parallelScan": true,
-	"cleanupEmptyDirs": true,
-	"include": [],
-	"exclude": ["**/.DS_Store", "**/.git/**", "**/node_modules/**"],
-	"textExtensions": [".html", ".xml", ".txt", ".json", ".js", ".css", ".md", ".svg"],
-	"mediaExtensions": [".jpg", ".jpeg", ".png", ".webp", ".gif", ".mp4", ".mov", ".mp3", ".wav", ".flac"],
-	"logLevel": "normal",
-	"logTimestamps": false,
-	"logFile": ".sftp-push-sync.{target}.log"
+  "connections": {
+    "staging": {
+      "host": "sftp.example.net",
+      "port": 22,
+      "user": "sftp-user",
+      "password": "nicht-in-git-speichern",
+      "workerUpload": 3,
+      "workerList": 5,
+   "sync": {
+      "localRoot": "public",
+      "remoteRoot": "/webseite/"
+   },
+   "sidecar": {
+     "localRoot": "sidecar-local",
+     "remoteRoot": "/sidecar/",
+     "uploadList": [],
+     "downloadList": []
+   }
+  }
+ },
+ "parallelScan": true,
+ "cleanupEmptyDirs": true,
+ "include": [],
+ "exclude": ["**/.DS_Store", "**/.git/**", "**/node_modules/**"],
+ "textExtensions": [".html", ".xml", ".txt", ".json", ".js", ".css", ".md", ".svg"],
+ "mediaExtensions": [".jpg", ".jpeg", ".png", ".webp", ".gif", ".mp4", ".mov", ".mp3", ".wav", ".flac"],
+ "logLevel": "normal",
+ "logTimestamps": false,
+ "logFile": ".sftp-push-sync.{target}.log"
 }
 ```
 

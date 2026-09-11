@@ -162,30 +162,30 @@ VeloSync uses the same configuration as the `sftp-push-sync` CLI. A minimal conf
       "host": "sftp.example.net",
       "port": 22,
       "user": "sftp-user",
-      "password": "do-not-commit-this",
+      "password": "nicht-in-git-speichern",
       "workerUpload": 3,
       "workerList": 5,
-      "sync": {
-        "localRoot": "public",
-        "remoteRoot": "/website/"
-      },
-      "sidecar": {
-        "localRoot": "sidecar-local",
-        "remoteRoot": "/sidecar/",
-        "uploadList": [],
-        "downloadList": []
-      }
-    }
-  },
-  "parallelScan": true,
-  "cleanupEmptyDirs": true,
-  "include": [],
-  "exclude": ["**/.DS_Store", "**/.git/**", "**/node_modules/**"],
-  "textExtensions": [".html", ".xml", ".txt", ".json", ".js", ".css", ".md", ".svg"],
-  "mediaExtensions": [".jpg", ".jpeg", ".png", ".webp", ".gif", ".mp4", ".mov", ".mp3", ".wav", ".flac"],
-  "logLevel": "normal",
-  "logTimestamps": false,
-  "logFile": ".sftp-push-sync.{target}.log"
+   "sync": {
+      "localRoot": "public",
+      "remoteRoot": "/webseite/"
+   },
+   "sidecar": {
+     "localRoot": "sidecar-local",
+     "remoteRoot": "/sidecar/",
+     "uploadList": [],
+     "downloadList": []
+   }
+  }
+ },
+ "parallelScan": true,
+ "cleanupEmptyDirs": true,
+ "include": [],
+ "exclude": ["**/.DS_Store", "**/.git/**", "**/node_modules/**"],
+ "textExtensions": [".html", ".xml", ".txt", ".json", ".js", ".css", ".md", ".svg"],
+ "mediaExtensions": [".jpg", ".jpeg", ".png", ".webp", ".gif", ".mp4", ".mov", ".mp3", ".wav", ".flac"],
+ "logLevel": "normal",
+ "logTimestamps": false,
+ "logFile": ".sftp-push-sync.{target}.log"
 }
 ```
 

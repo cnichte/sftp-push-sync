@@ -33,24 +33,16 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build Linux release
-        run: npm run dist -w @sftp-push-sync/gui -- --linux
-
-      - name: Stage Linux release
-        run: node scripts/stage-release.mjs --platform=linux
+      - name: Build and publish Linux release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run dist -w @sftp-push-sync/gui -- --linux --publish always
 
       - name: Upload Linux release artifact
         uses: actions/upload-artifact@v4
         with:
           name: velosync-linux-${{ inputs.tag || github.ref_name }}
           path: |
-            packages/gui/release/v*/linux-x64/*
+            packages/gui/release/*.AppImage
+            packages/gui/release/latest-linux.yml
           if-no-files-found: error
-
-      - name: Publish GitHub Release artifacts
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ inputs.tag || github.ref_name }}
-          generate_release_notes: true
-          files: |
-            packages/gui/release/v*/linux-x64/*

@@ -2,7 +2,7 @@
 
 ## [unpublished]
 
-_No changes yet._
+- Added the CLI package README and npm repository metadata.
 
 ## [4.1.0] - 2026-09-11
 

@@ -238,7 +238,7 @@ During the first run, local and remote files must be scanned and many hashes mus
 
 ### An update cannot be downloaded
 
-Check the internet connection and try checking for updates again in Settings. Installed applications use the published update source at `https://carsten-nichte.de/releases/velosync-app/`.
+Check the internet connection and try checking for updates again in Settings. Installed applications fetch updates directly from the GitHub Releases of `https://github.com/cnichte/sftp-push-sync`.
 
 ## Media
 

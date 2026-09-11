@@ -87,7 +87,7 @@ Documentation:
 - [VeloSync user manual](https://carsten-nichte.de/docs/projekte/software/aktiv/velosync-app-manual/)
 - [Repository](https://github.com/cnichte/sftp-push-sync)
 - [Changelog](https://github.com/cnichte/sftp-push-sync/blob/main/CHANGELOG.md)
-- [VeloSync releases](https://carsten-nichte.de/releases/velosync-app/)
+- [VeloSync releases](https://github.com/cnichte/sftp-push-sync/releases)
 
 ## License
 

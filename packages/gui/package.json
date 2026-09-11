@@ -1,6 +1,6 @@
 {
   "name": "@sftp-push-sync/gui",
-  "version": "4.2.0",
+  "version": "4.2.1",
   "description": "VeloSync desktop application for sftp-push-sync",
   "type": "module",
   "private": true,
@@ -14,8 +14,9 @@
     "build:renderer": "vite build",
     "postinstall": "electron-rebuild -f -w node-pty",
     "dist": "npm run build:renderer && electron-builder",
-    "dist:mac-arm": "npm run build:renderer && electron-builder --mac",
-    "dist:win": "npm run build:renderer && electron-builder --win"
+    "dist:mac-arm": "npm run build:renderer && electron-builder --mac --arm64 --publish always",
+    "dist:mac-intel": "npm run build:renderer && electron-builder --mac --x64 --publish always",
+    "dist:win": "npm run build:renderer && electron-builder --win --publish always"
   },
   "dependencies": {
     "@gfazioli/mantine-window": "^3.2.0",
@@ -79,8 +80,9 @@
       ]
     },
     "publish": {
-      "provider": "generic",
-      "url": "https://carsten-nichte.de/releases/velosync-app/"
+      "provider": "github",
+      "owner": "cnichte",
+      "repo": "sftp-push-sync"
     }
   }
 }

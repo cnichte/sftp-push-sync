@@ -244,7 +244,7 @@ Beim ersten Lauf müssen lokale und Remote-Dateien vollständig erfasst und viel
 
 ### Update kann nicht heruntergeladen werden
 
-Prüfe die Internetverbindung und versuche die Suche nach Updates erneut über die Einstellungen. Installierte Apps verwenden die veröffentlichte Update-Quelle unter `https://carsten-nichte.de/releases/velosync-app/`.
+Prüfe die Internetverbindung und versuche die Suche nach Updates erneut über die Einstellungen. Installierte Apps beziehen Updates direkt über die GitHub-Releases von `https://github.com/cnichte/sftp-push-sync`.
 
 ## Medien
 

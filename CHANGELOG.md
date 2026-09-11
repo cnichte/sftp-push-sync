@@ -4,6 +4,11 @@
 
 _No changes yet._
 
+## [4.2.1] - 2026-09-11
+
+- Switched the VeloSync auto-update feed and release publishing from the self-hosted generic URL to GitHub Releases (`electron-updater` provider `github`).
+- Removed the website release transport script; VeloSync `4.2.0` was superseded because it was still built against the old generic feed.
+
 ## [4.2.0] - 2026-09-11
 
 - Added the CLI package README and npm repository metadata (published as `sftp-push-sync@4.2.0`).

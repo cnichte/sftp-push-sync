@@ -78,13 +78,23 @@ The sync engine scans local and remote files, compares content using configured 
 
 Relative local paths are resolved relative to the directory containing `sync.config.json`. Remote paths are resolved on the SFTP server.
 
+## Example Output
+
+Please wait – the GIF will take a few seconds to load...
+
+![An console output example](https://github.com/cnichte/sftp-push-sync/blob/main/images/sftp-push-sync-run-example.gif)
+
 ## VeloSync desktop app
 
 VeloSync is the Electron desktop application built on the same sync engine. It provides structured progress views, connection and group management, job history, dry runs, connection testing, sidecar controls, and macOS, Windows, and Linux releases.
 
-Documentation:
+- Anyone who doesn’t particularly like working via the terminal will soon be able to do the same using the `VeloSync` App. The app will run on Linux, Windows and MacOS.
 
-- [VeloSync user manual](https://carsten-nichte.de/docs/projekte/software/aktiv/velosync-app-manual/)
+![Screenshot VeloSync App Benutzeroberfläche](https://github.com/cnichte/sftp-push-sync/blob/main/images/velosync-app-001.jpg?raw=true)
+
+## Documentation
+
+- [VeloSync user manual](https://github.com/cnichte/sftp-push-sync/tree/main/docs)
 - [Repository](https://github.com/cnichte/sftp-push-sync)
 - [Changelog](https://github.com/cnichte/sftp-push-sync/blob/main/CHANGELOG.md)
 - [VeloSync releases](https://github.com/cnichte/sftp-push-sync/releases)

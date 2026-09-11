@@ -21,7 +21,7 @@
     "@gfazioli/mantine-window": "^3.2.0",
     "@mantine/core": "^9.6.1",
     "@mantine/hooks": "^9.6.1",
-    "@sftp-push-sync/core": "^4.1.0",
+    "sftp-push-sync-core": "^4.1.0",
     "@tabler/icons-react": "^3.19.0",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/xterm": "^5.5.0",

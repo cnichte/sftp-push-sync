@@ -1,5 +1,5 @@
 // packages/gui/electron/jobManager.mjs
-import { SftpPushSyncApp } from "@sftp-push-sync/core";
+import { SftpPushSyncApp } from "sftp-push-sync-core";
 
 // Läuft im Main-Prozess: eine Registry laufender Jobs nach Connection-ID.
 // Eine ID ist `${configPath}::${name}` — der Name allein ist keine sichere

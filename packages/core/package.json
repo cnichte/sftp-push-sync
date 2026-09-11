@@ -1,5 +1,5 @@
 {
-  "name": "@sftp-push-sync/core",
+  "name": "sftp-push-sync-core",
   "version": "4.1.0",
   "description": "Sync engine for sftp-push-sync (no CLI/process concerns)",
   "type": "module",

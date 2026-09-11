@@ -38,7 +38,7 @@
 // bin/sftp-push-sync.mjs
 import { createRequire } from "module";
 import pc from "picocolors";
-import { SftpPushSyncApp } from "@sftp-push-sync/core";
+import { SftpPushSyncApp } from "sftp-push-sync-core";
 
 const require = createRequire(import.meta.url);
 const pkg = require("../package.json");

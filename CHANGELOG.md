@@ -2,7 +2,12 @@
 
 ## [unpublished]
 
-- Added the CLI package README and npm repository metadata.
+_No changes yet._
+
+## [4.2.0] - 2026-09-11
+
+- Added the CLI package README and npm repository metadata (published as `sftp-push-sync@4.2.0`).
+- Released VeloSync `4.2.0` for macOS (arm64) and Linux, built from the same codebase as `4.1.0` with no further application changes.
 
 ## [4.1.0] - 2026-09-11
 

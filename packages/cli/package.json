@@ -1,6 +1,6 @@
 {
   "name": "sftp-push-sync",
-  "version": "4.1.1",
+  "version": "4.2.0",
   "description": "SFTP sync tool for my Hugo projects (local to remote, with hash cache)",
   "type": "module",
   "bin": {

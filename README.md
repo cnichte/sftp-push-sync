@@ -125,6 +125,65 @@ const result = await sync.apply(plan);
 The public library includes TypeScript declarations. Hosts call the library,
 not a subprocess that parses human-readable CLI logs.
 
+### Local filters, bounded workers and acknowledged pause
+
+`LocalSync` and `LocalTransport` accept `include` / `exclude` arrays. Patterns
+are relative, case-sensitive `/` paths, including dotfiles. Includes are ORed;
+empty includes select everything; exclusions win. Spaces and semicolons are
+literal characters. Negation, absolute paths, backslashes and `.` / `..`
+segments are rejected. The same filter applies to source and target.
+Excluded target files are not deletion candidates. With filters active,
+directory cleanup is disabled so excluded contents cannot be removed.
+The CLI reads patterns from `connection.sync` or the global configuration.
+
+Local-only hosts can import `sftp-push-sync-core/local` without loading the
+SFTP/SSH implementation:
+
+```js
+import { LocalSync, SyncControl } from "sftp-push-sync-core/local";
+
+const control = new SyncControl();
+const engine = new LocalSync({
+  sourceRoot: "/source", targetRoot: "/target",
+  mode: "mirror", owner: "vault", stateFile: "/state/vault.json",
+  include: ["**/*.md"], exclude: ["private/**"],
+  concurrency: 4, control,
+});
+const approved = await engine.plan(); // Obtain host/user approval.
+const pending = engine.apply(approved);
+// A host Pause action calls control.requestPause().
+const result = await pending;
+if (result.paused) {
+  // Later, including after an application restart, use a fresh control/engine.
+  const resumed = new LocalSync({
+    sourceRoot: "/source", targetRoot: "/target",
+    mode: "mirror", owner: "vault", stateFile: "/state/vault.json",
+    include: ["**/*.md"], exclude: ["private/**"], concurrency: 4,
+  });
+  await resumed.resume();
+}
+```
+
+`concurrency` is an integer from 1 to 32 (default 1). Workers stop accepting
+new file operations after pause, abort or failure and drain all in-flight
+operations before returning. A pause finishes the current files; it is **not
+byte-resume**. Completion callbacks and checkpoints are serialized. Only after
+the paused checkpoint has been written does `apply()` return
+`{ ok: false, paused: true, exitCode: 0, completed }`. Pause during the final
+batch is still a pause, not a falsely completed transfer.
+
+`resume()` verifies configuration, root identities, the complete source
+snapshot, the expected target contents and the state fingerprint before
+applying the remaining approved work. Changed source/target/filter state
+requires a new plan and explicit approval. Existing manifests without the
+new filter-bound configuration are rejected; there is no implicit migration.
+An unjournaled rename or stale crash lock is not automatically repaired.
+
+This acknowledged pause API currently applies only to local transfers.
+`SftpPushSyncApp` rejects `control` explicitly rather than silently ignoring
+it. Existing SFTP cancellation, workers and interrupted-upload behavior remain
+unchanged; a universally safe SFTP pause/resume API is separate pending work.
+
 ### Safety and current limits
 
 - An unreachable source, scan error or abort is an error, never an empty source.

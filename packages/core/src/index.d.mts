@@ -8,6 +8,7 @@ export interface SyncResult {
   completed?: CompletedOperation[];
   error?: Error;
   plan?: LocalSyncPlan;
+  paused?: boolean;
 }
 export interface SyncHostOptions {
   target?: string;
@@ -28,6 +29,7 @@ export interface SyncHostOptions {
   signal?: AbortSignal;
   onLog?: (level: string, line: string) => void;
   onEvent?: (event: SyncEvent) => void;
+  control?: SyncControl;
 }
 export class SftpPushSyncConfigError extends Error {}
 export class SftpPushSyncApp {
@@ -60,10 +62,14 @@ export interface LocalSyncConfig {
   mode: SyncMode;
   owner: string;
   stateFile: string;
+  include?: string[];
+  exclude?: string[];
 }
 export interface LocalSyncOptions extends LocalSyncConfig {
   signal?: AbortSignal;
   onEvent?: (event: SyncEvent) => void;
+  control?: SyncControl;
+  concurrency?: number;
 }
 export interface LocalSyncPlan {
   version: 1;
@@ -82,6 +88,7 @@ export class LocalSync {
   constructor(options: LocalSyncOptions);
   plan(): Promise<LocalSyncPlan>;
   apply(approvedPlan: LocalSyncPlan): Promise<SyncResult>;
+  resume(): Promise<SyncResult>;
 }
 export interface LocalChange {
   rel: string;
@@ -89,7 +96,7 @@ export interface LocalChange {
   targetEntry: LocalFileEntry | null;
 }
 export class LocalTransport {
-  constructor(root: string, options?: Pick<LocalSyncOptions, "signal" | "onEvent">);
+  constructor(root: string, options?: Pick<LocalSyncOptions, "signal" | "onEvent" | "include" | "exclude">);
   open(): Promise<LocalSnapshot["identity"]>;
   inventory(): Promise<LocalSnapshot>;
   entry(rel: string): Promise<LocalEntry | null>;
@@ -121,6 +128,8 @@ export class SyncExecutor<T extends { rel: string }> {
   constructor(options: {
     transport: TransferAdapter<T>;
     signal?: AbortSignal;
+    control?: SyncControl;
+    concurrency?: number;
     onComplete?: (kind: SyncOperation, item: T) => Promise<void>;
     runGroup?: (items: T[], handler: (item: T) => Promise<void>, kind: SyncOperation) => Promise<{ failed?: number } | void>;
   });
@@ -128,6 +137,22 @@ export class SyncExecutor<T extends { rel: string }> {
     changes: { add?: T[]; update?: T[]; remove?: T[] },
     options?: { beforeDeletes?: () => Promise<void> },
   ): Promise<{ completed: CompletedOperation[] }>;
+}
+export class FileFilter {
+  constructor(options?: { include?: string[]; exclude?: string[] });
+  readonly include: string[];
+  readonly exclude: string[];
+  static validatePatterns(value: unknown): string[];
+  excludesDirectory(rel: string): boolean;
+  includesFile(rel: string): boolean;
+}
+export class SyncControl {
+  readonly pauseRequested: boolean;
+  requestPause(): void;
+  check(): void;
+}
+export class SyncPausedError extends Error {
+  completed?: CompletedOperation[];
 }
 export interface SftpChange {
   rel: string;

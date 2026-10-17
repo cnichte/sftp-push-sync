@@ -4,6 +4,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { LocalTransport, containsPath, validateRelativePath } from "../transports/LocalTransport.mjs";
 import { SyncPlanner } from "./SyncPlanner.mjs";
 import { SyncExecutor, SyncExecutionError } from "./SyncExecutor.mjs";
+import { FileFilter } from "./FileFilter.mjs";
+import { SyncControl, SyncPausedError } from "./SyncControl.mjs";
 
 const digest = (value) => createHash("sha256").update(value).digest("hex");
 const files = (snapshot) => new Map(snapshot.entries.filter((entry) => entry.type === "file").map((entry) => [entry.rel, entry]));
@@ -13,7 +15,7 @@ const content = (entries) => entries.map(({ rel, type, sha256 }) => ({ rel, type
   .sort((a, b) => a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0);
 
 export class LocalSync {
-  constructor({ sourceRoot, targetRoot, mode, owner, stateFile, signal, onEvent = () => {} }) {
+  constructor({ sourceRoot, targetRoot, mode, owner, stateFile, signal, control = new SyncControl(), concurrency = 1, include, exclude, onEvent = () => {} }) {
     if (!["mirror", "managed"].includes(mode)) throw new Error("Explicit mode 'mirror' or 'managed' is required.");
     if (typeof owner !== "string" || !owner.trim()) throw new Error("A stable owner is required.");
     if (typeof stateFile !== "string" || !stateFile) throw new Error("A stateFile outside the content roots is required.");
@@ -22,8 +24,12 @@ export class LocalSync {
     this.stateFile = path.resolve(stateFile);
     this.signal = signal;
     this.onEvent = onEvent;
-    this.source = new LocalTransport(sourceRoot, { signal, onEvent });
-    this.target = new LocalTransport(targetRoot, { signal, onEvent });
+    if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 32) throw new Error("concurrency must be between 1 and 32.");
+    this.concurrency = concurrency;
+    this.control = control;
+    this.filter = new FileFilter({ include, exclude });
+    this.source = new LocalTransport(sourceRoot, { signal, onEvent, include, exclude });
+    this.target = new LocalTransport(targetRoot, { signal, onEvent, include, exclude });
   }
 
   async roots() {
@@ -39,6 +45,7 @@ export class LocalSync {
     this.config = {
       mode: this.mode, owner: this.owner, sourceRoot: this.source.root,
       targetRoot: this.target.root, stateFile: this.canonicalStateFile,
+      include: this.filter.include, exclude: this.filter.exclude,
     };
   }
 
@@ -54,7 +61,7 @@ export class LocalSync {
     const raw = await fs.readFile(this.canonicalStateFile, "utf8");
     const manifest = JSON.parse(raw);
     if (manifest.version !== 1 || !same(manifest.config, this.config) ||
-        !["complete", "partial"].includes(manifest.status) ||
+        !["complete", "partial", "paused"].includes(manifest.status) ||
         !Array.isArray(manifest.files) || !Array.isArray(manifest.directories)) {
       throw new Error("State manifest does not match this sync configuration.");
     }
@@ -112,6 +119,7 @@ export class LocalSync {
     for (const rel of remove) remaining.delete(rel);
     const removeDirectories = [];
     for (const rel of targetDirs.filter((directory) => !sourceDirs.includes(directory) &&
+      !this.filter.include.length && !this.filter.exclude.length &&
       (this.mode === "mirror" || ownedDirs.has(directory))).sort((a, b) => b.split("/").length - a.split("/").length)) {
       if (![...remaining].some((child) => child.startsWith(`${rel}/`))) {
         removeDirectories.push(rel);
@@ -177,6 +185,10 @@ export class LocalSync {
           roots: { source: this.source.identity, target: this.target.identity },
           files: [...owned].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([rel, sha256]) => ({ rel, sha256 })),
           directories: [...ownedDirs].sort(),
+          ...(status !== "complete" ? { checkpoint: {
+            source: plan.source,
+            targetContent: content([...expectedTarget.values()]),
+          } } : {}),
         }, stateHash);
       };
       this.onEvent({ type: "phase", name: "apply", label: "Apply approved plan" });
@@ -192,6 +204,8 @@ export class LocalSync {
       };
       const executor = new SyncExecutor({
         signal: this.signal,
+        control: this.control,
+        concurrency: this.concurrency,
         transport: {
           copy: (item) => this.target.copyFrom(this.source, item),
           remove: async (item) => {
@@ -199,40 +213,58 @@ export class LocalSync {
             await this.target.remove(item);
           },
         },
-        onComplete: async (kind, item) => {
-          completed.push({ kind, rel: item.rel });
-          if (kind === "delete") {
-            owned.delete(item.rel);
-            expectedTarget.delete(item.rel);
-          } else {
-            owned.set(item.rel, item.sourceEntry.sha256);
-            expectedTarget.set(item.rel, item.sourceEntry);
-          }
-          await save("partial");
-          this.onEvent({ type: "task-progress", kind, path: item.rel, current: completed.length, total: plan.add.length + plan.update.length + plan.remove.length });
+        onComplete: (kind, item) => {
+          const operation = completionQueue.then(async () => {
+            completed.push({ kind, rel: item.rel });
+            if (kind === "delete") {
+              owned.delete(item.rel);
+              expectedTarget.delete(item.rel);
+            } else {
+              owned.set(item.rel, item.sourceEntry.sha256);
+              expectedTarget.set(item.rel, item.sourceEntry);
+            }
+            await save("partial");
+            this.onEvent({ type: "task-progress", kind, path: item.rel, current: completed.length, total: plan.add.length + plan.update.length + plan.remove.length });
+          });
+          completionQueue = operation;
+          return operation;
         },
       });
-      await executor.execute({
-        add: plan.add.map(change), update: plan.update.map(change), remove: plan.remove.map(change),
-      }, { beforeDeletes: verifySource });
-      if (plan.removeDirectories.length) await verifySource();
-      for (const rel of plan.removeDirectories) {
-        await this.source.open();
-        await this.target.removeDirectory(rel);
-        ownedDirs.delete(rel);
-        expectedTarget.delete(rel);
+      let completionQueue = Promise.resolve();
+      await save("partial");
+      try {
+        await executor.execute({
+          add: plan.add.map(change), update: plan.update.map(change), remove: plan.remove.map(change),
+        }, { beforeDeletes: verifySource });
+        if (plan.removeDirectories.length) await verifySource();
+        for (const rel of plan.removeDirectories) {
+          this.control.check();
+          await this.source.open();
+          await this.target.removeDirectory(rel);
+          ownedDirs.delete(rel);
+          expectedTarget.delete(rel);
+          await save("partial");
+        }
+        const finalTarget = await this.target.inventory();
+        if (!same(content(finalTarget.entries), content([...expectedTarget.values()]))) {
+          throw new Error("Target changed during execution; final verification failed.");
+        }
+        await verifySource();
+        this.control.check();
+        owned.clear();
+        for (const [rel, entry] of sourceFiles) owned.set(rel, entry.sha256);
+        await save("complete");
+        const result = { ok: true, exitCode: 0, completed };
+        this.onEvent({ type: "complete", ...result });
+        return result;
+      } catch (error) {
+        if (!(error instanceof SyncPausedError)) throw error;
+        await completionQueue;
+        await save("paused");
+        const result = { ok: false, paused: true, exitCode: 0, completed };
+        this.onEvent({ type: "paused", ...result });
+        return result;
       }
-      const finalTarget = await this.target.inventory();
-      if (!same(content(finalTarget.entries), content([...expectedTarget.values()]))) {
-        throw new Error("Target changed during execution; final verification failed.");
-      }
-      await verifySource();
-      owned.clear();
-      for (const [rel, entry] of sourceFiles) owned.set(rel, entry.sha256);
-      await save("complete");
-      const result = { ok: true, exitCode: 0, completed };
-      this.onEvent({ type: "complete", ...result });
-      return result;
     } catch (error) {
       const failure = error instanceof SyncExecutionError ? error :
         new SyncExecutionError(`Local sync incomplete: ${error.message}`, completed, error);
@@ -243,5 +275,19 @@ export class LocalSync {
       await lock.close();
       await fs.unlink(lockPath);
     }
+  }
+
+  async resume() {
+    await this.roots();
+    const { manifest, hash } = await this.readState();
+    if (!manifest?.checkpoint || !["paused", "partial"].includes(manifest.status)) {
+      throw new Error("No resumable transfer checkpoint.");
+    }
+    const plan = await this.plan();
+    if (plan.stateHash !== hash || !same(plan.source, manifest.checkpoint.source) ||
+        !same(content(plan.target.entries), manifest.checkpoint.targetContent)) {
+      throw new Error("Source or target changed since checkpoint; a new plan and explicit approval are required.");
+    }
+    return this.apply(plan);
   }
 }

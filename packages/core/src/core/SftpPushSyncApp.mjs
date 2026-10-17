@@ -116,6 +116,9 @@ export class SftpPushSyncApp {
    * }
    */
   constructor(options = {}) {
+    if (options.control) {
+      throw new SftpPushSyncConfigError("Acknowledged pause/resume is currently available only for LocalSync.");
+    }
     this.options = options;
 
     // Logging-Callback (Konsole ist Sache des Aufrufers, z.B. der CLI)

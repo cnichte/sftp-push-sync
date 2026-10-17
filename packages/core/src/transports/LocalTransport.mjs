@@ -4,6 +4,7 @@ import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { pipeline } from "node:stream/promises";
 import { Transform } from "node:stream";
+import { FileFilter } from "../core/FileFilter.mjs";
 
 export function validateRelativePath(rel) {
   if (typeof rel !== "string" || !rel || /[\\:\0]/.test(rel) ||
@@ -22,11 +23,12 @@ function fingerprint(stat) {
 }
 
 export class LocalTransport {
-  constructor(root, { signal, onEvent = () => {} } = {}) {
+  constructor(root, { signal, onEvent = () => {}, include, exclude } = {}) {
     if (typeof root !== "string" || !root) throw new Error("A local root is required.");
     this.requestedRoot = path.resolve(root);
     this.signal = signal;
     this.onEvent = onEvent;
+    this.filter = new FileFilter({ include, exclude });
   }
 
   async open() {
@@ -97,6 +99,8 @@ export class LocalTransport {
       children.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
       for (const child of children) {
         const rel = prefix ? `${prefix}/${child.name}` : child.name;
+        if (child.isDirectory() && this.filter.excludesDirectory(rel)) continue;
+        if (!child.isDirectory() && !this.filter.includesFile(rel)) continue;
         validateRelativePath(rel);
         const normalized = rel.normalize("NFC").toLowerCase();
         if (names.has(normalized)) throw new Error(`Case/Unicode path collision: ${rel}`);
@@ -113,7 +117,22 @@ export class LocalTransport {
       }
     };
     await walk(this.root, "");
-    return { identity: this.identity, entries };
+    // Keep only ancestors of included files; exclusions must never authorize
+    // removing a directory whose omitted contents are unknown to this snapshot.
+    const ancestors = new Set();
+    for (const entry of entries.filter((entry) => entry.type === "file")) {
+      let parent = path.posix.dirname(entry.rel);
+      while (parent !== ".") {
+        ancestors.add(parent);
+        parent = path.posix.dirname(parent);
+      }
+    }
+    return {
+      identity: this.identity,
+      entries: this.filter.include.length || this.filter.exclude.length
+        ? entries.filter((entry) => entry.type === "file" || ancestors.has(entry.rel))
+        : entries,
+    };
   }
 
   async ensureDirectory(rel) {

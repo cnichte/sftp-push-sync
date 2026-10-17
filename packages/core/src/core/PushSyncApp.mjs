@@ -35,9 +35,6 @@ export class PushSyncApp {
     if (!sync?.sourceRoot || !sync?.targetRoot || !profile.stateFile) {
       throw new SftpPushSyncConfigError("Local profiles require sync.sourceRoot, sync.targetRoot and stateFile.");
     }
-    if ((sync.include?.length ?? 0) || (sync.exclude?.length ?? 0)) {
-      throw new SftpPushSyncConfigError("Local sync currently copies the complete source root; filters are not supported.");
-    }
     const configDir = path.dirname(configPath);
     const engine = new LocalSync({
       sourceRoot: path.resolve(configDir, sync.sourceRoot),
@@ -45,6 +42,9 @@ export class PushSyncApp {
       mode: sync.mode, owner: options.target,
       stateFile: path.resolve(configDir, profile.stateFile),
       signal: options.signal, onEvent: options.onEvent,
+      include: sync.include ?? config.include, exclude: sync.exclude ?? config.exclude,
+      concurrency: options.workerUpload ?? profile.workerUpload ?? 1,
+      control: options.control,
     });
     if (options.applyPlan) {
       const plan = JSON.parse(await fs.readFile(path.resolve(options.applyPlan), "utf8"));

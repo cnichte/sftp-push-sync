@@ -1,15 +1,22 @@
 import { LocalSync, PushSyncApp, SyncExecutor, type LocalSyncPlan, type SyncMode } from "sftp-push-sync-core";
+import { FileFilter, SyncControl, LocalTransport } from "sftp-push-sync-core/local";
 
 const mode: SyncMode = "mirror";
 const engine = new LocalSync({
   sourceRoot: "/source", targetRoot: "/target", mode,
-  owner: "vault", stateFile: "/state/vault.json",
+  owner: "vault", stateFile: "/state/vault.json", concurrency: 4,
+  control: new SyncControl(), include: ["**/*.md"], exclude: ["private/**"],
   onEvent(event) { const type: string = event.type; void type; },
 });
 const plan: LocalSyncPlan = await engine.plan();
 const result = await engine.apply(plan);
 const ok: boolean = result.ok;
 void ok;
+const filter = new FileFilter({ include: ["**/*.md"] });
+new LocalTransport("/source", { include: filter.include });
+const resumed = await engine.resume();
+const paused: boolean | undefined = resumed.paused;
+void paused;
 new PushSyncApp({ target: "local", dryRun: true, planFile: "plan.json" });
 const executor = new SyncExecutor<{ rel: string; size: number }>({
   transport: { async copy(item) { void item.size; }, async remove(item) { void item.rel; } },

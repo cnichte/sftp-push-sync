@@ -5,6 +5,16 @@
   "type": "module",
   "main": "src/index.mjs",
   "types": "src/index.d.mts",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.mts",
+      "import": "./src/index.mjs"
+    },
+    "./local": {
+      "types": "./src/local.d.mts",
+      "import": "./src/local.mjs"
+    }
+  },
   "dependencies": {
     "cli-progress": "^3.12.0",
     "cli-spinners": "^3.4.0",

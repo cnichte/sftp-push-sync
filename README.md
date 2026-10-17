@@ -31,6 +31,10 @@ The file `sftp-push-sync.mjs` is pure JavaScript (ESM). Node.js can execute it d
 
 ## News
 
+- The development version also supports local file-copy  (push-sync) through the library and
+  CLI, with explicit `mirror` and `managed` modes. The desktop configuration UI
+  remains SFTP-only for now. See [Local file-copy](#local-file-copy).
+
 - Anyone who doesn’t particularly like working via the terminal will soon be able to do the same using the `CatoPushSync` App. The app will run on Linux, Windows and MacOS.
 
 ![Screenshot CatoPushSync App Benutzeroberfläche](https://github.com/cnichte/sftp-push-sync/blob/main/images/catopushsync-app-001.jpg?raw=true)
@@ -48,6 +52,129 @@ The file `sftp-push-sync.mjs` is pure JavaScript (ESM). Node.js can execute it d
 - The flags `--upload-list` / `--download-list` have been replaced by
   `--sidecar-upload` / `--sidecar-download`.
 - The settings for sidecars are now located in the `sidecar` block of the connection.
+
+## Local file-copy (push-sync)
+
+Local sync uses the same planner and transfer executor as SFTP, with a local
+filesystem adapter. Existing SFTP profiles and commands retain their settings
+and execution path. Local profiles use an explicit transport and mode:
+
+```json
+{
+  "connections": {
+    "vault-archive": {
+      "transport": "local",
+      "stateFile": "./sync-state/vault-archive.json",
+      "sync": {
+        "sourceRoot": "./example-vault",
+        "targetRoot": "./example-archive",
+        "mode": "mirror"
+      }
+    }
+  }
+}
+```
+
+Create the source, target and state **parent directory** beforehand. Relative
+profile paths resolve against the configuration file, not the shell directory.
+The profile name is the stable owner identity; changing it, the mode or roots
+does not silently reuse a previous ownership manifest.
+
+- **`mirror`:** Source is master of the entire exclusive target root. Files and
+  empty directories removed from a completely scanned source are removed from
+  the target in the approved run. A genuinely empty source can empty the target.
+- **`managed`:** Use for partial exports into an existing project. Only this
+  profile's recorded files may be updated or deleted. Unrelated project files
+  survive; collisions with foreign files and externally modified/deleted owned
+  files stop planning.
+
+```bash
+# Read-only inventory and explicit plan; never overwrite an existing plan file.
+cato-push-sync vault-archive --dry-run --plan-file ./approved-plan.json
+
+# Inspect approved-plan.json, then revalidate and apply exactly that plan.
+cato-push-sync vault-archive --apply-plan ./approved-plan.json
+```
+
+Plan-file arguments resolve against the shell working directory. Plan files,
+state and lock files must remain outside both content roots. A plan records
+root identities, full inventories, hashes, configuration and state fingerprint.
+Any change requires a new plan; editing the plan does not authorize arbitrary
+operations. Without `--dry-run` or `--apply-plan`, local CLI execution is rejected.
+`--json` emits structured progress and result records.
+
+### Library usage
+
+```js
+import { LocalSync } from "sftp-push-sync-core";
+
+const sync = new LocalSync({
+  sourceRoot: "/absolute/source",
+  targetRoot: "/absolute/target",
+  mode: "managed",
+  owner: "website-blog",
+  stateFile: "/absolute/sync-state/website-blog.json",
+  signal: new AbortController().signal,
+  onEvent: (event) => { /* forward progress to the host */ },
+});
+const plan = await sync.plan();
+// Present the plan for approval in the host before calling apply.
+const result = await sync.apply(plan);
+```
+
+The public library includes TypeScript declarations. Hosts call the library,
+not a subprocess that parses human-readable CLI logs.
+
+### Safety and current limits
+
+- An unreachable source, scan error or abort is an error, never an empty source.
+  Both inventories must complete before an executable plan exists.
+  Successful state also binds source and target directory identities across
+  runs. A replacement root (for example an empty mount-point directory after a
+  drive disappears) requires explicit reassignment; it is not treated as deletion.
+- Copies stream through unique target-side temporary files, are hash-verified,
+  flushed and renamed individually. Old target bytes survive an interrupted
+  copy. Copy errors prevent the subsequent deletion phase.
+- The source is revalidated before deletion; each target file is rechecked
+  before mutation. Final inventories must match the intended result.
+- A run is **not a whole-tree transaction**. Errors/aborts report completed file
+  operations in `SyncExecutionError.completed`. The ownership manifest is
+  checkpointed after completed file operations with `partial` status; replan to
+  continue. Studio must add isolated staging and consistent publication of
+  content, metadata and relationships before using this for an archive import.
+- A lock prevents concurrent writes using the same state file. Hosts must also
+  reserve overlapping targets across different profiles/processes. Do not run
+  independent writers against the target during a sync.
+- After a process crash, do not remove a leftover `.lock` until confirming the
+  process has stopped. A crash between a file operation and its manifest write
+  can require explicit conflict resolution; automatic crash recovery/rollback
+  is not claimed.
+- Roots may not overlap. Symlinks, special files, file/directory replacements
+  and ambiguous case/Unicode paths are rejected explicitly, not skipped.
+- Every source file is included, including hidden files/configuration.
+  Global SFTP include/exclude and sidecar settings do not filter local copies;
+  local filters and size-only mode are not supported.
+- Content bytes and directory names are copied, not ownership, timestamps,
+  executable bits, ACLs or macOS extended attributes. New files/directories use
+  restrictive owner-only permissions where POSIX permissions apply.
+- This is a current-state mirror, not a versioned backup. Source plugins and
+  scripts are never executed. The core does not interpret Obsidian or Studio
+  sidecars. Local GUI editing and Studio integration are separate next steps.
+  The desktop app reports unsupported local profiles and refuses to edit them
+  through its SFTP form, rather than accidentally changing their owner or roots.
+
+## Development checks
+
+```bash
+npm test       # Node tests, loopback SFTP server, CLI and TypeScript API contract
+npm run build # Native ESM syntax and TypeScript API checks
+npm run build:renderer -w @sftp-push-sync/gui
+```
+
+Tests use isolated temporary directories and ephemeral loopback SSH credentials,
+never real server credentials or production targets. CI runs tests on Linux
+and macOS with Node 22. The GUI renderer build is an additional integration
+check, not part of the core's native-ESM build.
 
 ## Install
 

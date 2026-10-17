@@ -210,6 +210,12 @@ ipcMain.handle("list-connections", async () => {
       const raw = JSON.parse(await fs.readFile(cfgPath, "utf8"));
       const projectName = raw.projectName || path.basename(path.dirname(cfgPath));
       for (const [name, cfg] of Object.entries(raw.connections || {})) {
+        if (cfg.transport && cfg.transport !== "sftp") {
+          const error = `Connection '${name}': transport '${cfg.transport}' is not supported by the desktop UI yet. Use the CLI.`;
+          logger.warn(error);
+          errors.push({ configPath: cfgPath, error });
+          continue;
+        }
         const sync = cfg.sync ?? cfg;
         const sidecar = cfg.sidecar ?? {};
         connections.push({
@@ -367,6 +373,9 @@ ipcMain.handle("update-connection", async (_event, { configPath, name, updates }
     const cfg = raw.connections?.[name];
     if (!cfg) {
       return { ok: false, error: `Connection '${name}' not found in ${configPath}` };
+    }
+    if (cfg.transport && cfg.transport !== "sftp") {
+      return { ok: false, error: "Local/unknown transport profiles cannot be edited by the SFTP desktop editor." };
     }
 
     // Der Connection-Name ist der JSON-Key selbst — bei Umbenennung den Key

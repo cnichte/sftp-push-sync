@@ -8,6 +8,9 @@
     "packages/*"
   ],
   "scripts": {
+    "build": "node scripts/check-syntax.mjs && npm run test:types",
+    "test": "node --test packages/core/test/*.test.mjs packages/cli/test/*.test.mjs && npm run test:types",
+    "test:types": "tsc --noEmit --strict --types node --module NodeNext --moduleResolution NodeNext --target ES2022 packages/core/test/types.mts",
     "dev": "npm run dev -w @sftp-push-sync/gui",
     "generate:icons": "node scripts/generate-app-icons.mjs",
     "release:mac": "npm run dist:mac-arm -w @sftp-push-sync/gui",
@@ -23,6 +26,11 @@
     "ncu-me": "ncu -i --format group",
     "tree": "tree -a -L 4 ./packages > directory-structure.txt"
   },
+  "devDependencies": {
+    "@types/node": "20.19.43",
+    "ssh2": "1.17.0",
+    "typescript": "5.9.3"
+  },
   "keywords": [
     "hugo",
     "sftp",
@@ -32,4 +40,3 @@
   "author": "Carsten Nichte",
   "license": "GPL-3.0-or-later"
 }
-

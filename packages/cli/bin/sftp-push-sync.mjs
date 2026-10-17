@@ -38,7 +38,7 @@
 // bin/sftp-push-sync.mjs
 import { createRequire } from "module";
 import pc from "picocolors";
-import { SftpPushSyncApp } from "sftp-push-sync-core";
+import { PushSyncApp } from "sftp-push-sync-core";
 
 const require = createRequire(import.meta.url);
 const pkg = require("../package.json");
@@ -89,6 +89,8 @@ let CHECK_RESUME_SUPPORT = false;
 let JSON_MODE = false;
 let cliLogLevel = null;
 let configPath = undefined;
+let planFile;
+let applyPlan;
 
 const rest = rawArgs.slice(1);
 
@@ -124,15 +126,19 @@ for (let i = 0; i < rest.length; i += 1) {
       JSON_MODE = true;
       break;
     case "--config":
+    case "--plan-file":
+    case "--apply-plan":
     case "-c": {
       const next = rest[i + 1];
       if (!next || next.startsWith("-")) {
         console.error(
-          pc.red("❌ --config expects a path argument (e.g. --config sync.config.json)")
+          pc.red(`❌ ${a} expects a path argument.`)
         );
         process.exit(1);
       }
-      configPath = next;
+      if (a === "--plan-file") planFile = next;
+      else if (a === "--apply-plan") applyPlan = next;
+      else configPath = next;
       i += 1; // Pfad überspringen
       break;
     }
@@ -169,6 +175,8 @@ function printUsage() {
   console.log("");
   console.log(pc.bold("Options:"));
   console.log("  --dry-run            Do not change anything, just simulate");
+  console.log("  --plan-file <file>   Save a local dry-run plan (new file, outside content roots)");
+  console.log("  --apply-plan <file>  Revalidate and execute an approved local plan");
   console.log("  --size-only          Compare file sizes only, skip content hashes");
   console.log("  --check-resume-support  Test remote append and rename capabilities only");
   console.log(
@@ -207,7 +215,7 @@ async function main() {
   process.once("SIGINT", () => requestShutdown("SIGINT"));
   process.once("SIGTERM", () => requestShutdown("SIGTERM"));
 
-  const app = new SftpPushSyncApp({
+  const app = new PushSyncApp({
     target: TARGET,
     dryRun: DRY_RUN,
     runUploadList: RUN_UPLOAD_LIST,
@@ -217,8 +225,13 @@ async function main() {
     checkResumeSupport: CHECK_RESUME_SUPPORT,
     cliLogLevel,
     configPath,
+    planFile,
+    applyPlan,
     version: pkg.version,
     signal: controller.signal,
+    onEvent: (event) => {
+      if (JSON_MODE) console.log(JSON.stringify(event));
+    },
     onLog: (level, line) => {
       if (JSON_MODE) {
         const payload = JSON.stringify({ type: "log", level, line, ts: Date.now() });
@@ -245,14 +258,14 @@ async function main() {
 main().catch((err) => {
   if (JSON_MODE) {
     console.error(
-      JSON.stringify({ type: "result", ok: false, exitCode: 1, error: err?.message || String(err) })
+      JSON.stringify({ type: "result", ok: false, exitCode: err?.exitCode ?? 1, error: err?.message || String(err), completed: err?.completed })
     );
-    process.exitCode = 1;
+    process.exitCode = err?.exitCode ?? 1;
     return;
   }
   console.error(pc.red("❌ Unhandled error in sftp-push-sync:"), err?.message || err);
   if (process.env.DEBUG) {
     console.error(err);
   }
-  process.exitCode = 1;
+  process.exitCode = err?.exitCode ?? 1;
 });

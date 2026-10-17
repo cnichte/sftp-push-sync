@@ -9,6 +9,7 @@ import fs from "fs";
 import fsp from "fs/promises";
 import path from "path";
 import { Writable } from "stream";
+import { SyncPlanner } from "../core/SyncPlanner.mjs";
 
 // Liest eine lokale Datei komplett ein, meldet aber Zwischenstände statt nur das Endergebnis.
 function readLocalFileWithProgress(filePath, size, onProgress) {
@@ -106,40 +107,23 @@ export async function analyseDifferences({
   // Phase 1: Schneller Vorab-Check ohne SFTP
   // - Dateien nur lokal → direkt zu toAdd
   // - Size-Vergleich für existierende Dateien
-  // - Große Dateien: nur MTime-Vergleich (kein Hash-Download)
-  const keysNeedContentCompare = [];
+  const partition = SyncPlanner.partition(local, remote);
+  const additions = new Set(partition.add);
+  const updates = new Set(partition.update);
+  const keysNeedContentCompare = sizeOnly ? [] : partition.compare;
 
   for (const rel of localKeys) {
     const l = local.get(rel);
     const r = remote.get(rel);
     const remotePath = path.posix.join(remoteRoot, rel);
 
-    if (!r) {
+    if (additions.has(rel)) {
       // Datei existiert nur lokal → New (kein SFTP-Call nötig)
       toAdd.push({ rel, local: l, remotePath });
-    } else if (l.size !== r.size) {
+    } else if (updates.has(rel)) {
       // Size unterschiedlich → Changed (kein SFTP-Call nötig)
       toUpdate.push({ rel, local: l, remote: r, remotePath });
-    // } else if (l.size > maxSizeForHash) {
-    //   // Große Datei mit gleicher Size: nur MTime vergleichen
-    //   // Remote modifyTime ist String wie "2026-03-05", local mtimeMs ist Timestamp
-    //   const localDate = new Date(l.mtimeMs).toISOString().split('T')[0];
-    //   const remoteDate = r.modifyTime ? r.modifyTime.split('T')[0] : '';
-    //   
-    //   if (localDate > remoteDate) {
-    //     // Local ist neuer → Changed
-    //     toUpdate.push({ rel, local: l, remote: r, remotePath });
-    //     if (log) {
-    //       const sizeMB = (l.size / (1024 * 1024)).toFixed(1);
-    //       log(`   ℹ Large file (${sizeMB}MB) newer locally: ${rel}`);
-    //     }
-    //   } else {
-    //     largeFilesSkipped.push({ rel, size: l.size });
-    //   }
-    } else if (!sizeOnly) {
-      // Size gleich, normale Größe → Content-Vergleich nötig
-      keysNeedContentCompare.push(rel);
-    } else {
+    } else if (sizeOnly) {
       largeFilesSkipped.push({ rel, size: l.size });
     }
 
@@ -305,14 +289,7 @@ export async function analyseDifferences({
  * remote: Map<rel, { rel, remotePath }>
  */
 export function computeRemoteDeletes({ local, remote }) {
-  const toDelete = [];
-  const localKeys = new Set(local.keys());
-
-  for (const [rel, r] of remote.entries()) {
-    if (!localKeys.has(rel)) {
-      toDelete.push({ rel, remotePath: r.remotePath });
-    }
-  }
-
-  return toDelete;
+  return SyncPlanner.deletions(local, remote).map((rel) => ({
+    rel, remotePath: remote.get(rel).remotePath,
+  }));
 }

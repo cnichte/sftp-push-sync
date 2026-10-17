@@ -19,6 +19,8 @@ import { ScanProgressController } from "./ScanProgressController.mjs";
 import { MultiLineProgressRenderer } from "./MultiLineProgressRenderer.mjs";
 import { SimpleProgressBar } from "./SimpleProgressBar.mjs";
 import { ProgressMetrics } from "./ProgressMetrics.mjs";
+import { SyncExecutor } from "./SyncExecutor.mjs";
+import { SftpTransport } from "../transports/SftpTransport.mjs";
 
 import { toPosix, shortenPathForProgress } from "../helpers/directory.mjs";
 import { createHashCacheNDJSON, migrateFromJsonCache } from "../helpers/hash-cache-ndjson.mjs";
@@ -343,16 +345,8 @@ export class SftpPushSyncApp {
     const uploadPath = async (targetPath, offset = 0) => {
       if (offset > 0) {
         this.log(`${TAB_A}${pc.dim(`  Resuming ${shortenPathForProgress(rel)} at ${this._formatBytes(offset)}…`)}`);
-        await new Promise((resolve, reject) => {
-          const readStream = fs.createReadStream(localPath, { start: offset });
-          const writeStream = sftp.createWriteStream(targetPath, {
-            flags: "r+",
-            start: offset,
-          });
-          readStream.on("error", reject);
-          writeStream.on("error", reject);
-          writeStream.on("finish", resolve);
-          readStream.pipe(writeStream);
+        await sftp.put(fs.createReadStream(localPath, { start: offset }), targetPath, {
+          writeStreamOptions: { flags: "r+", start: offset },
         });
         return;
       }
@@ -744,12 +738,14 @@ export class SftpPushSyncApp {
         const item = items[i];
 
         let retries = 0;
+        let succeeded = false;
         const maxRetries = 5; // Increased from 2 to 5 for unstable servers
 
         while (retries <= maxRetries) {
           if (abortSignal?.aborted) throw new Error("Sync aborted.");
           try {
             await handler(item);
+            succeeded = true;
             break; // Success, exit retry loop
           } catch (err) {
             const msg = err?.message || String(err);
@@ -817,8 +813,8 @@ export class SftpPushSyncApp {
               msg
             );
 
+            failedCount++;
             if (retries >= maxRetries) {
-              failedCount++;
               this.elog(pc.red(`${TAB_A}❌ Failed after ${maxRetries + 1} attempts: ${item.rel || item.remotePath || ''}`));
             }
             break; // Exit retry loop
@@ -826,8 +822,10 @@ export class SftpPushSyncApp {
         }
 
         done += 1;
-        completedBytes += Number(item?.local?.size || item?.size || 0);
-        if (item?.rel) completedPaths.push(item.rel);
+        if (succeeded) {
+          completedBytes += Number(item?.local?.size || item?.size || 0);
+          if (item?.rel) completedPaths.push(item.rel);
+        }
         this.progressMetrics.update(metricName, {
           files: done,
           bytes: completedBytes,
@@ -1320,6 +1318,10 @@ export class SftpPushSyncApp {
 
     const syncCfg = targetConfig.sync ?? targetConfig;
     const sidecarCfg = targetConfig.sidecar ?? {};
+
+    if (targetConfig.transport && targetConfig.transport !== "sftp") {
+      throw new SftpPushSyncConfigError("This host supports SFTP profiles only. Use PushSyncApp or LocalSync for local transport.");
+    }
 
     if (!syncCfg.localRoot || !syncCfg.remoteRoot) {
       throw new SftpPushSyncConfigError(
@@ -1935,60 +1937,18 @@ export class SftpPushSyncApp {
           await this._reconnect(sftp);
         }
 
-        // Upload new files
-        await this.runTasks(
-          toAdd,
-          this.connection.workers,
-          async ({ local: l, remotePath, rel }) => {
-            const remoteDir = path.posix.dirname(remotePath);
-            try {
-              await sftp.mkdir(remoteDir, true);
-            } catch {
-              // Directory may already exist
-            }
-            await this._uploadFile(sftp, l.localPath, remotePath, rel, l.size);
-            this._adjustDirFileCount(remoteDirIndex, rel, +1);
-          },
-          "Uploads (new)",
-          sftp
-        );
-
-        // Updates
-        await this.runTasks(
-          toUpdate,
-          this.connection.workers,
-          async ({ local: l, remotePath, rel }) => {
-            const remoteDir = path.posix.dirname(remotePath);
-            try {
-              await sftp.mkdir(remoteDir, true);
-            } catch {
-              // Directory may already exist
-            }
-            await this._uploadFile(sftp, l.localPath, remotePath, rel, l.size);
-          },
-          "Uploads (update)",
-          sftp
-        );
-
-        // Deletes
-        await this.runTasks(
-          toDelete,
-          this.connection.workers,
-          async ({ remotePath, rel }) => {
-            try {
-              await sftp.delete(remotePath);
-              this._adjustDirFileCount(remoteDirIndex, rel, -1);
-            } catch (e) {
-              this.elog(
-                pc.red("   ⚠️ Error during deletion:"),
-                rel || remotePath,
-                e?.message || e
-              );
-            }
-          },
-          "Deletes",
-          sftp
-        );
+        const transport = new SftpTransport({
+          client: sftp,
+          uploadFile: (...args) => this._uploadFile(sftp, ...args),
+          onFileCount: (rel, delta) => this._adjustDirFileCount(remoteDirIndex, rel, delta),
+        });
+        const labels = { add: "Uploads (new)", update: "Uploads (update)", delete: "Deletes" };
+        await new SyncExecutor({
+          transport,
+          signal: this.options.signal,
+          runGroup: (items, handler, kind) =>
+            this.runTasks(items, this.connection.workers, handler, labels[kind], sftp),
+        }).execute({ add: toAdd, update: toUpdate, remove: toDelete });
       } else {
         this.log("");
         this.log(

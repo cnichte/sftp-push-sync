@@ -4,6 +4,7 @@
   "description": "Sync engine for sftp-push-sync (no CLI/process concerns)",
   "type": "module",
   "main": "src/index.mjs",
+  "types": "src/index.d.mts",
   "dependencies": {
     "cli-progress": "^3.12.0",
     "cli-spinners": "^3.4.0",

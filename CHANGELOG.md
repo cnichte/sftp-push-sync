@@ -2,7 +2,17 @@
 
 ## [unpublished]
 
-_No changes yet._
+- Extracted a shared planner and transfer executor with local and SFTP adapters;
+  existing SFTP connection, progress, cache and recovery handling remains in its host.
+- Added local `mirror` and ownership-based `managed` sync via library and CLI,
+  explicit serialized plan approval, streaming SHA-256 verification, abort,
+  partial ownership checkpoints and path/conflict validation.
+- Added TypeScript library contracts, automated Node/CLI/real-loopback-SFTP tests
+  and Linux/macOS test CI.
+- SFTP file failures now count as failures and stop the subsequent deletion phase.
+  Resumed uploads use the client's stream lifecycle instead of waiting on a
+  `finish` event that can fail to fire with the underlying SSH write stream.
+- Local GUI configuration and Art.Works! Studio import services are not included yet.
 
 ## [4.2.2] - 2026-09-12
 

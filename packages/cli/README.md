@@ -74,7 +74,37 @@ sftp-push-sync staging --check-resume-support
 
 The CLI also supports `--verbose`, `--laconic`, and `--size-only` for output and comparison control.
 
-## How it works
+## Local file-copy (development version)
+
+Local profiles require `transport: "local"`, `stateFile`, and a `sync` block
+containing `sourceRoot`, `targetRoot` and an explicit `mode`.
+Use `mirror` for an exclusive target root whose entire content follows the
+source, including deletions. Use `managed` for a partial project export which
+must preserve unrelated files and track its own published files.
+
+```bash
+cato-push-sync vault-archive --dry-run --plan-file ./approved-plan.json
+# Review the complete JSON plan, then:
+cato-push-sync vault-archive --apply-plan ./approved-plan.json
+```
+
+Existing source/target and state-parent directories are required. All profile
+paths resolve against the configuration file; CLI plan-file paths resolve
+against the shell working directory. Plan and state files must stay outside
+both content roots. A missing source is an error, not a deletion request.
+Local writes without an approved plan are rejected. Local copies include hidden
+files and do not use global SFTP filters or sidecar lists.
+
+Transfers are atomic per file, **not for the entire tree**. Failed runs report
+completed operations and checkpoint ownership for replanning; they do not
+promise rollback or automatic crash recovery. Symlinks, special files,
+file/directory replacements and ambiguous case/Unicode paths are rejected.
+New copies use restrictive permissions; original filesystem attributes are
+not preserved. Local profile editing in the desktop app is not implemented.
+
+See the [complete local transport contract and library API](https://github.com/cnichte/sftp-push-sync#local-file-copy).
+
+## SFTP execution
 
 The sync engine scans local and remote files, compares content using configured rules and cached hashes, creates a synchronization plan, prepares remote directories, applies changes, and cleans up empty directories. Uploads use temporary files in the target directory and replace the target only after a successful transfer. Recovery state is kept for interrupted long-running jobs.
 
